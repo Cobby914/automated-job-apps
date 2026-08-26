@@ -1,0 +1,75 @@
+\documentclass[12pt,letterpaper]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{fontspec}
+\usepackage{hyperref}
+\usepackage{setspace}
+\usepackage{nopageno}
+
+\IfFontExistsTF{Times New Roman}{%
+  \setmainfont{Times New Roman}%
+}{%
+  \setmainfont{TeX Gyre Termes}%
+}
+
+\setlength{\parindent}{0pt}
+\setlength{\parskip}{0.5em}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=black,
+  filecolor=black,
+  urlcolor=black,
+}
+
+\newcommand{\headerline}{%
+  \noindent\makebox[\linewidth]{\rule{\paperwidth}{0.4pt}}%
+}
+
+\begin{document}
+
+\begin{center}
+{\fontsize{30}{30}\selectfont\textbf{\VAR{contact.name}}}\par
+\vspace{-0.4em}
+\headerline
+\vspace{0.1em}
+
+\begin{spacing}{0.2}
+{\fontsize{12}{12}\selectfont
+\VAR{contact.location}\BLOCK{if contact.phone} \\
+\VAR{contact.phone}\BLOCK{endif}\BLOCK{if contact.email} \\
+\href{mailto:\VAR{contact.email_href}}{\VAR{contact.email}}\BLOCK{endif}}
+\end{spacing}
+
+\vspace{0.1em}
+\headerline
+\end{center}
+
+\vspace{1em}
+
+{\fontsize{12}{12}\selectfont\today}
+
+\vspace{1em}
+
+{\fontsize{12}{12}\selectfont
+Hiring Manager \\
+\VAR{job.company}}
+
+\vspace{1em}
+
+\VAR{cover.greeting}
+
+\BLOCK{for paragraph in cover.paragraphs}
+\VAR{paragraph}
+
+\BLOCK{endfor}
+
+\vspace{1em}
+
+\VAR{cover.closing}
+
+\vspace{2em}
+
+\VAR{contact.name}
+
+\end{document}

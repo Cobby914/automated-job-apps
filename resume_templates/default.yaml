@@ -1,0 +1,115 @@
+contact:
+  name: Colin Kwon
+  email: colinkwon914@gmail.com
+  phone: "(661) 388-6492"
+  location: Irvine, CA
+  linkedin: https://www.linkedin.com/in/colin-kwon-22a190324/
+  github: https://github.com/Cobby914
+  website: "https://colinkwon914.com/"
+
+experience:
+  - company: TENA
+    role: Technical Lead
+    location: Los Angeles, CA
+    start: Dec. 2025
+    end: Present
+    bullets:
+      - Shipped a site and admin portal with React, Vite, Chakra UI, TanStack Query, and Zustand, surging visits by 30%.
+      - Orchestrating Agile sprint cycles and task delegation, maintaining high development velocity and ensure delivery.
+      - Built REST APIs and database schemas enabling non-developers to update site content without manual deployments.
+      - Implemented Google sign-in for admins with Firebase Auth and Firebase Admin token checking for secure API access.
+
+  - company: M.K Lending
+    role: Software Engineer Intern
+    location: Brea, CA
+    start: Aug. 2024
+    end: Dec. 2025
+    bullets:
+      - Built a loan-lookup REST API using TypeScript and Node.js, reducing manual calculations by 4 hours per day.
+      - Made a Python/pandas rate-sheet pipeline with PostgreSQL, saving 3 hours of processing time daily.
+      - Created a dashboard tracking employee loans using React, PostgreSQL, and TypeScript for 5+ managers.
+
+  - company: FiPET
+    role: Software Engineer Intern
+    location: San Francisco, CA
+    start: Dec. 2025
+    end: Present
+    bullets:
+      - Architected a graph-based social schema to optimize multi-level connection and relationship queries.
+      - Optimized friend request flows and backend logic, reducing query latency by 10%, ensuring ACID compliance.
+      - Integrated Firebase Emulator Suite into local development, accelerating backend testing and iteration.
+
+  - company: Commit the Change
+    role: Software Engineer
+    location: Irvine, CA
+    start: Sep. 2025
+    end: May 2026
+    bullets:
+      - Building a full-stack platform with React and Node.js for Celebrating Life CHC to serve 100+ local patients.
+      - Engineered an admin approval flow using Google OAuth and TypeScript APIs, reducing onboarding time by 40%.
+      - Developed RESTful CRUD routes for location management in Express, improving data retrieval speed by 25%.
+
+education:
+  - school: University of California, Irvine
+    degree: B.S. Computer Science
+    location: Irvine, CA
+    year: "June 2027"
+    details: Dean's Honor List; Chancellor's Award for Excellence in Undergraduate Research
+
+projects:
+  - name: Canvas-Notion
+    url: ""
+    bullets:
+      - Made a Python sync engine to automate Canvas-to-Notion task tracking, using REST APIs and GitHub Actions.
+      - Engineered metadata transformation pipeline to calculate task priority and effort using custom heuristics.
+      - Implemented idempotent logic with Canvas Assignment IDs to ensure consistency and prevent duplicate entries.
+      - "Stack: Python, Canvas API, Notion API, GitHub Actions."
+
+  - name: Genome Sequencing
+    url: ""
+    bullets:
+      - Constructed a pipeline conjoining Humsavar and dbNSFP using DuckDB and pandas, improving F1 scores by 70%.
+      - Contributed data exploration using seaborn, pandas, and Matplotlib, increasing data readability for model tuning.
+      - Developed a neural network learner using Python, PyTorch, pandas, and scikit-learn with roughly 70% F1 score.
+      - "Stack: Python, DuckDB, pandas, PyTorch, scikit-learn."
+
+  - name: Tumor Classification based Scans
+    url: ""
+    bullets:
+      - Created a residual neural network using scikit-learn, PyTorch, and Python with an F1 score of roughly 99%.
+      - Implemented a grid search using pandas, Matplotlib, and PyTorch, optimizing the residual network by 30%.
+      - Implemented Grad-CAM for the residual neural network using PyTorch, reaching a spatial correlation of 0.67.
+      - "Stack: Python, PyTorch, scikit-learn, pandas."
+
+  - name: Smart Step
+    url: ""
+    bullets:
+      - Created a smart white cane detecting elevation changes and incoming objects using T.O.F and ultrasonic sensors.
+      - Developed a buzzer feedback system for blind and deaf users from sensor inputs with low-latency physical testing.
+      - Relayed data from ESP32 to AWS cloud for a Bluetooth voice feature with approximately 90% accuracy in trials.
+      - "Stack: C, PlatformIO, Arduino, ESP32, AWS."
+
+  - name: Reel In
+    url: ""
+    bullets:
+      - Developed a full-stack platform for students to find projects using JavaScript, TypeScript, CSS, and React.
+      - Created REST API routes for project pages using PostgreSQL, React, and JavaScript, increasing use by 50%.
+      - Implemented navbar, modals, and cards using React and CSS, reused by 5+ developers across the project team.
+      - "Stack: JavaScript, TypeScript, CSS, React, PostgreSQL."
+
+  - name: Personal Website
+    url: https://colinkwon914.com/
+    bullets:
+      - Built and deployed a responsive portfolio using Next.js 14, React, Tailwind CSS, Zustand, and Radix UI.
+      - Implemented persistent light/dark theme state with Zustand and localStorage alongside responsive navigation.
+      - "Stack: Next.js, React, Tailwind CSS, Zustand, Radix UI."
+
+skills:
+  - category: Languages
+    items: Python, C/C++, C#, Java, TypeScript, JavaScript, SQL
+  - category: Backend/Data
+    items: Node.js, Express, PostgreSQL, REST APIs, Firebase, DuckDB
+  - category: AI/ML
+    items: PyTorch, scikit-learn, TensorFlow, pandas, NumPy, Matplotlib, CARLA
+  - category: Systems/Tools
+    items: Linux/Unix, Git, AWS, Docker, GitHub Actions, Jupyter, PlatformIO

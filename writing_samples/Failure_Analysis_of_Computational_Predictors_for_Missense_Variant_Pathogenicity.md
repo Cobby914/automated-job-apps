@@ -1,0 +1,81 @@
+Introduction
+
+Missense variants are single-nucleotide changes that alter one amino acid in a protein sequence. Although these changes may appear small at the sequence level, they can affect protein folding, stability, binding, catalytic activity, and other biological functions. Distinguishing benign and pathogenic missense variants is an important issue in computational genomics and clinical variant interpretation. Because experimental validation is slow and expensive, computational predictors are often used to estimate whether a missense variant is likely to disrupt protein function.
+
+Several widely used tools have been developed for missense variant pathogenicity prediction. SIFT predicts tolerance of amino acid substitutions largely based on evolutionary conservation. PolyPhen-2 combines sequence conservation, structural features, and functional annotations to estimate whether a substitution is damaging. CADD integrates many genomic annotations into a single deleteriousness score. REVEL combines multiple existing predictors into an ensemble score, designed specifically for rare missense variants. Modern protein structure prediction models such as AlphaFold made it possible to examine whether difficult variants occur in structurally confident regions, low-confidence regions, or potentially flexible protein segments.
+
+Although these predictors are useful, results differ and failure is not uniform across all variants. A predictor may perform well overall while still misclassifying specific genes, amino acid substitutions, or biochemical changes. These failure patterns are important. They can reveal systematic weaknesses in current prediction tools. Rather than asking which model has the highest accuracy, this project focuses on the types of variants that are consistently difficult for state-of-the-art predictors to classify.
+
+In this study, I analyzed a merged Humsavar and dbNSFP missense variant dataset containing clinical variant labels and computational predictor scores. The project benchmarks SIFT, PolyPhen-2, CADD, and REVEL, along with logistic regression and random forest models, using standard classification metrics. After benchmarking, I performed a failure analysis to identify patterns among misclassified variants. Specifically, whether prediction failures are associated with gene identity, amino acid substitution type, biochemical change, predictor disagreement, and low-confidence decision-boundary scores. Finally, AlphaFold provides predicted protein structures and per-residue confidence estimates that can be used to examine local structural confidence.
+
+The central goal of this work is to determine the types of missense variants that are most often misclassified by current pathogenicity predictors. I hypothesized that prediction errors are not random, but rather, they are enriched in specific genes, substitutions, biochemical categories, and cases where predictors disagree. Identifying these failure modes, this study aims to provide a clearer understanding of where computational pathogenicity prediction remains limited and how difficult variants may be prioritized for further structural or functional analysis.
+
+Methodology
+
+This study used a merged missense variant dataset constructed from UniProt/Humsavar clinical annotations and dbNSFP functional prediction scores. Each row represents a single amino-acid-changing variant with a clinical label and computational predictor annotations. The original annotations were converted into a binary classification task: disease-associated variants were labeled pathogenic, while polymorphism variants were labeled benign. Variants with missing or unusable predictor values were removed so that SIFT, PolyPhen-2, CADD, and REVEL could be compared consistently.
+
+Four pathogenicity predictors were evaluated: SIFT, PolyPhen-2, CADD, and REVEL. SIFT was interpreted using the standard damaging threshold of 0.05 or below. PolyPhen-2 was interpreted using its benign/damaging score behavior, where higher scores indicate stronger predicted functional damage. CADD was evaluated using PHRED-scaled and raw scores, where higher values indicate more severe deleteriousness. REVEL was evaluated as an ensemble missense pathogenicity score from 0 to 1, where higher values indicate stronger evidence for pathogenicity. Logistic regression and random forest models were also trained using the predictor scores as input features. Logistic regression served as a simple linear combined-score baseline, while random forest tested whether nonlinear combinations of predictor scores improved classification.
+
+Predictor performance was evaluated using accuracy, precision, recall, F1-score, ROC-AUC, precision-recall AUC, and confusion matrices. ROC and precision-recall curves compared how well continuous predictor scores separated benign and pathogenic variants across different thresholds. Prediction failures were a predictor's binary classification disagreement with the known variant label. False positives were benign variants incorrectly predicted as pathogenic, while false negatives were pathogenic variants incorrectly predicted as benign.
+
+After benchmarking, prediction failures were grouped by gene, amino acid substitution, biochemical category, disease annotation, predictor disagreement, and distance from each predictor's decision threshold. Gene-level analysis measured whether failures were concentrated in specific genes, while substitution and biochemical analysis tested whether certain amino acid changes were more difficult to classify. Predictor disagreement was evaluated by grouping variants according to the disparity of the resulting labels.
+
+Finally, selected high-failure genes were analyzed using AlphaFold pLDDT confidence values at variant positions. Higher pLDDT values indicate greater local structural confidence, while lower values may indicate flexible, disordered, or uncertain regions. Failed and non-failed variants were compared by pLDDT score and confidence category to test whether predictor failures were concentrated in low-confidence structural regions.
+
+Results
+
+Benchmarking Results
+
+The first part of the analysis evaluates how well each predictor seperates benign and pathogenic missense variants. The dataset contained more benign variants than pathogenic variants, but both classes were represented in large numbers, allowing predictor performance to be evaluated across both benign and pathogenic variants.
+
+Overall benchmark performance varied. The random forest model achieved the highest ROC-AUC at 0.948, followed closely by logistic regression at 0.947 and REVEL at 0.946. Among the individual predictors, REVEL was the strongest standalone model. CADD raw and CADD PHRED also performed well, while PolyPhen-2 and SIFT had lower ROC-AUC values.
+
+The ROC and precision-recall curves supported the same pattern. REVEL, logistic regression, and random forest showed the strongest discrimination across thresholds. Random forest achieved the highest PR-AUC at 0.919, followed by logistic regression at 0.915 and REVEL at 0.913. SIFT and PolyPhen-2 had weaker precision-recall performance, indicating less reliable separation of pathogenic and benign variants.
+
+Detailed error patterns showed that SIFT and CADD PHRED tends to overpredict pathogenicity, producing many false positives. REVEL, logistic regression, and random forest had lower and more balanced false positive and false negative counts. The predictor score distributions also showed that many incorrect predictions occurred near decision thresholds, where correct and failed predictions overlapped. This was supported by the decision-boundary analysis, where incorrect predictions were generally closer to classification thresholds than correct predictions.
+
+The random forest model further demonstrated that REVEL was the strongest individual predictor. In the feature importance analysis, REVEL contributed the largest share of predictive signal, meaning that the combined model relied most heavily on REVEL when separating benign and pathogenic variants. Since logistic regression and random forest only slightly improved over REVEL, the results suggest that REVEL already captured much of the useful information available from the predictor score set.
+
+Failure Analysis Results
+
+After benchmarking, the analysis focused on whether errors were randomly distributed or concentrated in specific variant groups. Some genes had much higher failure rates than others, supporting the hypothesis that certain genes contain variants that are systematically harder to classify. This suggests that predictor reliability is not uniform across the genome and depends partly on gene-specific biological context.
+
+Failure patterns also differed by predictor and gene. Some genes were difficult across multiple tools, while others showed higher failure rates for only certain predictors. This indicates that the predictors do not all fail in the same way; each method relies on different assumptions, such as conservation, structural annotation, deleteriousness scoring, or ensemble integration.
+
+Amino acid substitution and biochemical grouping showed that failures were also associated with the type of amino acid change. Some substitutions and biochemical transitions had higher failure rates than others, suggesting that predictor errors are influenced by both the gene and the biochemical nature of the substitution.
+
+Disease-level grouping showed that some disease annotations contained higher failure rates, although these results should be interpreted carefully because category sizes may differ. Predictor disagreement was one of the clearest indicators of failure: variants with mixed predictor votes were more likely to be misclassified than variants where predictors agreed. The failure analysis shows misclassifications were systematic rather than random and enriched in specific genes, substitution types, biochemical changes, disease groups, and disagreement patterns.
+
+AlphaFold Structural Follow-Up
+
+AlphaFold pLDDT confidence scores tested whether predictor failures were concentrated in structurally uncertain protein regions. FGA had low mean pLDDT and high failure rate, but several other high-failure genes, including HBD, PRSS1, ALDOA, and DNASE1, had high mean pLDDT values.
+
+AlphaFold confidence categories showed the same pattern. Failed variants occurred across very high, confident, low, and very low confidence regions. FGA contained many low-confidence failures, but other genes had many failed variants in high-confidence regions. This indicates that low pLDDT may explain failures in some genes but not across the full dataset.
+
+A direct comparison of failed and non-failed variants showed that structural confidence was not a strong global predictor of failure. The median pLDDT was 88.94 for failed variants and 87.19 for non-failed variants, and the Mann-Whitney test was not significant (p = 0.225). The Spearman correlation between pLDDT and predictor failure was also weak (rho = 0.110, p = 0.074). Fisher exact tests also found no significant enrichment of predictor failures in low-confidence regions: pLDDT < 70 had an odds ratio of 0.536 and p = 0.134, while pLDDT < 50 had an odds ratio of 0.850 and p = 0.800. Together, these results show that AlphaFold confidence is useful for structural follow-up but does not fully explain predictor failure.
+
+Discussion
+
+This study shows that missense variant predictors can perform well overall while failing systematically on specific groups of variants. REVEL was the strongest standalone predictor; The random forest feature importance results showed that REVEL contributed the most useful signal among the predictor scores. However, the small improvement from logistic regression and random forest over REVEL suggests that combining multiple predictors only modestly improved performance in this dataset. This indicates that REVEL already captures much of the information provided by the other tools, but does not eliminate systematic prediction errors.
+
+The main finding is that predictor errors were not random. Failures were enriched in specific genes, amino acid substitutions, biochemical categories, disease annotations, and cases of predictor disagreement. This supports the idea that aggregate metrics such as ROC-AUC should be paired with failure analysis. A model can have strong overall performance while being unreliable for certain biological contexts. For example, a high ROC-AUC shows that a predictor separates benign and pathogenic variants well on average, but misses whether the predictor consistently fails on particular genes or substitution types.
+
+Predictor disagreement warns that a variant is uncertain and may require closer manual, structural, or experimental review. Variants with mixed predictions across SIFT, PolyPhen-2, CADD, and REVEL were more likely to be misclassified than variants where the tools agreed. Each predictor uses different assumptions and sources of information; Conservation-based tools, structural or annotation-based tools, and ensemble methods may respond differently to the same variant.
+
+The AlphaFold follow-up shows that low structural confidence does not fully explain predictor failure. Some failures occurred in low-confidence regions, especially for genes such as FGA, where flexible or uncertain protein regions may make variant interpretation more difficult. However, many failed variants occurred in high-confidence regions, meaning that AlphaFold pLDDT alone is not enough to identify difficult variants. This suggests that predictor failure may also depend on functional sites, biochemical effects, disease-specific mechanisms, local protein environment, or limitations in the training data used by computational predictors.
+
+Limitations
+
+Several limitations should be considered. First, the analysis depends on the quality of Humsavar and dbNSFP annotations, and binary benign/pathogenic labels simplify the complexity of clinical variant interpretation. Second, predictor thresholds affect false positive and false negative counts, so different threshold choices could change some failure patterns. Third, some gene, disease, and substitution groups may have small sample sizes, making their failure rates less stable. Finally, this study did not include experimental validation, so the findings should be interpreted as computational patterns rather than direct biological proof.
+
+Conclusion
+
+This project benchmarked SIFT, PolyPhen-2, CADD, REVEL, logistic regression, and random forest models for missense variant pathogenicity prediction. REVEL was the strongest standalone predictor and performed nearly as well as the combined machine learning models. However, failure analysis shows prediction errors were systematic rather than random, with higher failure rates in specific genes, substitutions, biochemical categories, disease annotations, and predictor disagreement cases. AlphaFold follow-up shows low structural confidence alone did not explain these failures; many misclassified variants occurred in high-confidence regions. Overall, this study shows that benchmark metrics should be paired with failure analysis to better identify difficult variant groups.
+
+Future Implementation
+
+Future work could expand the dataset with additional clinical variant databases and newer dbNSFP annotations to make gene-level and disease-level failure rates more stable. Additional predictors, such as AlphaMissense, MutPred2, and DANN, could also be included to test whether newer models reduce the observed failure patterns. The structural analysis could be improved by adding protein domains, active-site annotations, solvent accessibility, and distance to functional residues, rather than relying mainly on AlphaFold pLDDT confidence.
+
+Data and Computational Resources
+
+This project used a merged UniProt/Humsavar and dbNSFP missense variant dataset with SIFT, PolyPhen-2, CADD, REVEL, and AlphaFold pLDDT annotations. Analyses were performed in Python using Google Colab, pandas, NumPy, scikit-learn, matplotlib, and seaborn. Code and outputs are available at https://github.com/Cobby914/Failure-Analysis-of-Computational-Predictors-for-Missense-Variant-Pathogenicity.

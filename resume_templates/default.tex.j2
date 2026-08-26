@@ -1,0 +1,182 @@
+%-------------------------
+% Resume in Latex
+% Author : Jake Gutierrez
+% Based off of: https://github.com/sb2nov/resume
+% License : MIT
+% Adapted as a Jinja2 template for AutomatedJobApps.
+%------------------------
+
+\documentclass[letterpaper,11pt]{article}
+
+\usepackage{latexsym}
+\usepackage[empty]{fullpage}
+\usepackage{titlesec}
+\usepackage{marvosym}
+\usepackage[usenames,dvipsnames]{color}
+\usepackage{verbatim}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{fancyhdr}
+\usepackage[english]{babel}
+\usepackage{tabularx}
+
+\pagestyle{fancy}
+\fancyhf{}
+\fancyfoot{}
+\renewcommand{\headrulewidth}{0pt}
+\renewcommand{\footrulewidth}{0pt}
+
+\addtolength{\oddsidemargin}{-0.5in}
+\addtolength{\evensidemargin}{-0.5in}
+\addtolength{\textwidth}{1in}
+\addtolength{\topmargin}{-.5in}
+\addtolength{\textheight}{1.0in}
+
+\urlstyle{same}
+
+\raggedbottom
+\raggedright
+\setlength{\tabcolsep}{0in}
+
+\titleformat{\section}{
+  \vspace{-10pt}\scshape\raggedright\large
+}{}{0em}{}[\color{black}\titlerule \vspace{-8pt}]
+
+\newcommand{\resumeItem}[1]{
+  \item\small{
+    {#1 \vspace{-2pt}}
+  }
+}
+
+\newcommand{\resumeSubheading}[4]{
+  \vspace{-2pt}\item
+    \begin{tabular*}{0.97\textwidth}[t]{l@{\extracolsep{\fill}}r}
+      \textbf{#1} & #2 \\
+      \textit{\small#3} & \textit{\small #4} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubSubheading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \textit{\small#1} & \textit{\small #2} \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeProjectHeading}[2]{
+    \item
+    \begin{tabular*}{0.97\textwidth}{l@{\extracolsep{\fill}}r}
+      \small#1 & #2 \\
+    \end{tabular*}\vspace{-7pt}
+}
+
+\newcommand{\resumeSubItem}[1]{\resumeItem{#1}\vspace{-4pt}}
+
+\renewcommand\labelitemii{$\vcenter{\hbox{\tiny$\bullet$}}$}
+
+\newcommand{\resumeSubHeadingListStart}{\begin{itemize}[leftmargin=0.15in, label={}]}
+\newcommand{\resumeSubHeadingListEnd}{\end{itemize}}
+\newcommand{\resumeItemListStart}{\begin{itemize}}
+\newcommand{\resumeItemListEnd}{\end{itemize}\vspace{-5pt}}
+
+\begin{document}
+
+\begin{center}
+    \textbf{\Huge \scshape \VAR{contact.name}} \\ \vspace{1pt}
+    \small
+    \BLOCK{set ns = namespace(sep=false)}
+    \BLOCK{if contact.phone}
+      \VAR{contact.phone}
+      \BLOCK{set ns.sep = true}
+    \BLOCK{endif}
+    \BLOCK{if contact.email}
+      \BLOCK{if ns.sep} $|$ \BLOCK{endif}
+      \href{mailto:\VAR{contact.email_href}}{\underline{\VAR{contact.email}}}
+      \BLOCK{set ns.sep = true}
+    \BLOCK{endif}
+    \BLOCK{if contact.linkedin}
+      \BLOCK{if ns.sep} $|$ \BLOCK{endif}
+      \href{\VAR{contact.linkedin_url}}{\underline{\VAR{contact.linkedin}}}
+      \BLOCK{set ns.sep = true}
+    \BLOCK{endif}
+    \BLOCK{if contact.github}
+      \BLOCK{if ns.sep} $|$ \BLOCK{endif}
+      \href{\VAR{contact.github_url}}{\underline{\VAR{contact.github}}}
+      \BLOCK{set ns.sep = true}
+    \BLOCK{endif}
+    \BLOCK{if contact.website}
+      \BLOCK{if ns.sep} $|$ \BLOCK{endif}
+      \href{\VAR{contact.website_url}}{\underline{\VAR{contact.website}}}
+    \BLOCK{endif}
+\end{center}
+
+\BLOCK{if resume.education}
+\section{Education}
+  \resumeSubHeadingListStart
+    \BLOCK{for item in resume.education}
+    \resumeSubheading
+      {\VAR{item.school}}{\VAR{item.location}}
+      {\VAR{item.degree}}{\VAR{item.year}}
+    \BLOCK{endfor}
+  \resumeSubHeadingListEnd
+\BLOCK{endif}
+
+\BLOCK{if resume.experience}
+\section{Experience}
+  \resumeSubHeadingListStart
+    \BLOCK{for item in resume.experience}
+    \resumeSubheading
+      {\VAR{item.role}}{\VAR{item.start} -- \VAR{item.end}}
+      {\VAR{item.company}}{\VAR{item.location}}
+      \BLOCK{if item.bullets}
+      \resumeItemListStart
+        \BLOCK{for bullet in item.bullets}
+        \resumeItem{\VAR{bullet}}
+        \BLOCK{endfor}
+      \resumeItemListEnd
+      \BLOCK{endif}
+    \BLOCK{endfor}
+  \resumeSubHeadingListEnd
+\BLOCK{endif}
+
+\BLOCK{if resume.projects}
+\vspace{-10pt}
+\section{Projects}
+    \resumeSubHeadingListStart
+      \BLOCK{for item in resume.projects}
+      \resumeProjectHeading
+          {\textbf{\VAR{item.name}}\BLOCK{if item.stack} $|$ \emph{\VAR{item.stack}}\BLOCK{endif}}{\BLOCK{if item.href}\href{\VAR{item.href}}{\underline{\VAR{item.url}}}\BLOCK{endif}}
+          \BLOCK{if item.bullets}
+          \resumeItemListStart
+            \BLOCK{for bullet in item.bullets}
+            \resumeItem{\VAR{bullet}}
+            \BLOCK{endfor}
+          \resumeItemListEnd
+          \BLOCK{endif}
+      \BLOCK{endfor}
+    \resumeSubHeadingListEnd
+\BLOCK{endif}
+
+\BLOCK{if resume.awards}
+\section{Awards}
+ \begin{itemize}[leftmargin=0.15in, label={}]
+    \small{\item{
+     \BLOCK{for award in resume.awards}
+     \textbf{\VAR{award}} \\
+     \BLOCK{endfor}
+    }}
+ \end{itemize}
+\BLOCK{endif}
+
+\BLOCK{if resume.skills}
+\section{Technical Skills}
+ \begin{itemize}[leftmargin=0.15in, label={}]
+    \small{\item{
+     \BLOCK{for group in resume.skills}
+     \textbf{\VAR{group.category}}{: \VAR{group['items']}} \\
+     \BLOCK{endfor}
+    }}
+ \end{itemize}
+\BLOCK{endif}
+
+\end{document}

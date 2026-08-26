@@ -1,0 +1,100 @@
+contact:
+  name: Colin Kwon
+  email: colinkwon914@gmail.com
+  phone: "(661) 388-6492"
+  location: Irvine, CA
+  linkedin: https://www.linkedin.com/in/colin-kwon-22a190324/
+  github: https://github.com/Cobby914
+  website: "https://colinkwon914.com/"
+
+experience:
+  - company: M.K Lending
+    role: Software Engineer Intern
+    location: Brea, CA
+    start: Aug. 2024
+    end: Dec. 2025
+    bullets:
+      - Built a loan-lookup REST API/interface using TypeScript and Node.js, reducing calculations by 4 hours per day.
+      - Made a rate-sheet ingestion pipeline with Python, pandas, and PostgreSQL, saving 3 hours of processing.
+      - Created a dashboard tracking employee loans using React, PostgreSQL, and TypeScript for 5+ managers.
+
+  - company: TENA
+    role: Technical Lead
+    location: Los Angeles, CA
+    start: Dec. 2025
+    end: Present
+    bullets:
+      - Orchestrating Agile sprint cycles and task delegation, maintaining high development velocity and ensure delivery.
+      - Shipped a site and admin portal with React, Vite, Chakra UI, TanStack Query, and Zustand, surging visits by 30%.
+      - Built a schema and REST APIs for non-developers to update the site without manual deployments using Render.
+      - Implemented Google sign-in for admins with Firebase Auth and Firebase Admin token checking for API.
+
+  - company: FiPET
+    role: Software Engineer Intern
+    location: San Francisco, CA
+    start: Dec. 2025
+    end: Present
+    bullets:
+      - Architected a graph-based social schema to optimize multi-level connection and relationship queries.
+      - Optimized friend request flows and backend logic, reducing query latency by 10%, ensuring ACID compliance.
+      - Integrated Firebase Emulator Suite into the local development cycle, accelerating feature iteration and reliability.
+
+  - company: Commit the Change
+    role: Software Engineer
+    location: Irvine, CA
+    start: Sep. 2025
+    end: Present
+    bullets:
+      - Building a full-stack platform with React and Node.js for Celebrating Life CHC to serve 100+ local patients.
+      - Engineered an admin approval flow using Google OAuth and TypeScript APIs, reducing onboarding time by 40%.
+      - Developed RESTful CRUD routes for location management in Express, improving data retrieval speed by 25%.
+
+education:
+  - school: University of California, Irvine
+    degree: B.S. Computer Science
+    location: Irvine, CA
+    year: "June 2027"
+    details: Campus wide Honors Collegium at UCI; Dean's Honor List
+
+projects:
+  - name: Genome Sequencing
+    url: ""
+    bullets:
+      - Constructed a data pipeline conjoining Humsavar and dbNSFP using DuckDB, pandas, and Python, improving F1 by 70%.
+      - Contributed data exploration using seaborn, pandas, and Matplotlib, increasing data readability for model tuning.
+      - Developed a neural network learner using Python, PyTorch, pandas, and scikit-learn with a F1 score of roughly 70.
+      - "Stack: Python, DuckDB, pandas, PyTorch, scikit-learn."
+
+  - name: Tumor Classification based Scans
+    url: ""
+    bullets:
+      - Created a residual neural network using scikit-learn, PyTorch, and Python with an F1 score of roughly 99.
+      - Implemented a grid search using pandas, Matplotlib, and PyTorch, optimizing the residual neural network by 30%.
+      - Implemented Grad-CAM for the residual neural network using PyTorch, reaching a spatial correlation of 0.67.
+      - "Stack: Python, PyTorch, scikit-learn, pandas."
+
+  - name: Canvas-Notion
+    url: ""
+    bullets:
+      - Made a Python sync engine to automate Canvas-to-Notion task tracking, using REST APIs and GitHub Actions.
+      - Engineered metadata transformation pipeline to calculate task priority and effort using custom heuristics.
+      - Implemented idempotent logic with Canvas Assignment IDs to ensure consistency and prevent duplicate entries.
+      - "Stack: Python, Canvas API, Notion API, GitHub Actions."
+
+  - name: Reel In
+    url: ""
+    bullets:
+      - Developed a full-stack platform for students to find projects using JavaScript, TypeScript, CSS, and React.
+      - Created REST API routes for project pages using PostgreSQL, React, and JavaScript, increasing use by 50%.
+      - Implemented navbar, modals, and cards using React and CSS, reused by 5+ developers across the project team.
+      - "Stack: JavaScript, TypeScript, CSS, React, PostgreSQL."
+
+skills:
+  - category: Languages
+    items: Java, Python, C/C++, SQL, JavaScript, HTML/CSS, TypeScript, Assembly
+  - category: Frameworks
+    items: React, Node.js, Next.js, Zustand, Chakra UI, Radix UI, AWS
+  - category: Developer Tools
+    items: Git, Visual Studio, PlatformIO, PyCharm, Eclipse, Jupyter, Google Colab
+  - category: Libraries
+    items: pandas, NumPy, Matplotlib, scikit-learn, TensorFlow, DuckDB, PyTorch

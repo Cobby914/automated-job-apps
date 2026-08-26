@@ -1,0 +1,18 @@
+services:
+  worker:
+    build: .
+    env_file:
+      - .env
+    environment:
+      JOBAPPS_ROOT: /app
+      JOBAPPS_IN_DOCKER: "1"
+    volumes:
+      - ./jobs:/app/jobs
+      - ./output:/app/output
+      - ./resume_templates:/app/resume_templates:ro
+      - ./cover_letter_templates:/app/cover_letter_templates:ro
+      - ./cover_letter_examples:/app/cover_letter_examples:ro
+      - ./writing_samples:/app/writing_samples:ro
+      - ./resume_additions:/app/resume_additions:ro
+      - ./connections:/app/connections:ro
+    restart: unless-stopped

@@ -1,0 +1,100 @@
+contact:
+  name: Colin Kwon
+  email: colinkwon914@gmail.com
+  phone: "(661) 388-6492"
+  location: Irvine, CA
+  linkedin: https://www.linkedin.com/in/colin-kwon-22a190324/
+  github: https://github.com/Cobby914
+  website: "https://colinkwon914.com/"
+
+experience:
+  - company: M.K Lending
+    role: Software Engineer Intern
+    location: Brea, CA
+    start: Aug. 2024
+    end: Dec. 2025
+    bullets:
+      - Built a loan-lookup REST API/interface using TypeScript and Node.js, reducing calculations by 4 hours per day.
+      - Made a rate-sheet ingestion pipeline with Python, pandas, and PostgreSQL, saving 3 hours of processing.
+      - Created a dashboard tracking employee loans using React, PostgreSQL, and TypeScript for 5+ managers.
+
+  - company: University of California, Irvine
+    role: Research Assistant
+    location: Irvine, CA
+    start: Dec. 2025
+    end: Present
+    bullets:
+      - Researching a multi-modal perception system fusing camera and radar data to improve object detection accuracy.
+      - Implementing SOTA deep learning architectures in PyTorch on sensor calibration and spatial feature alignment.
+      - Engineered a CARLA pipeline to create a synchronized radar-camera dataset with labels and geometric metadata.
+
+  - company: TENA
+    role: Technical Lead
+    location: Los Angeles, CA
+    start: Dec. 2025
+    end: Present
+    bullets:
+      - Orchestrating Agile sprint cycles and task delegation, maintaining high development velocity and ensure delivery.
+      - Shipped a site and admin portal with React, Vite, Chakra UI, TanStack Query, and Zustand, surging visits by 30%.
+      - Built a schema and REST APIs for non-developers to update the site without manual deployments using Render.
+      - Implemented Google sign-in for admins with Firebase Auth and Firebase Admin token checking for API.
+
+  - company: Commit the Change
+    role: Software Engineer
+    location: Irvine, CA
+    start: Sep. 2024
+    end: June 2025
+    bullets:
+      - Developed a full-stack volunteer tracking dashboard using React, Chakra UI, and Node.js used by 5+ managers.
+      - Built backend API and schemas using PostgreSQL, Axios, and TypeScript to build volunteer tracking tables.
+      - Optimized case manager table loading latency using React, improving load times by 30 sec. compared to 40 sec.
+
+education:
+  - school: University of California, Irvine
+    degree: B.S. Computer Science
+    location: Irvine, CA
+    year: "June 2027"
+    details: Campus wide Honors Collegium at UCI; Dean's Honor List
+
+projects:
+  - name: Genome Sequencing
+    url: ""
+    bullets:
+      - Constructed a pipeline conjoining Humsavar and dbNSFP using DuckDB and pandas, improving F1 scores by 70%.
+      - Contributed data exploration using seaborn, pandas, and Matplotlib, increasing data readability for model tuning.
+      - Developed a neural network learner using Python, PyTorch, pandas, and scikit-learn with a F1 score of roughly 70.
+      - "Stack: Python, DuckDB, pandas, PyTorch, scikit-learn."
+
+  - name: Smart Step
+    url: ""
+    bullets:
+      - Created a smart white cane detecting elevation changes and incoming objects using T.O.F and ultrasonic sensors.
+      - Developed a buzzer feedback system for blind and deaf users from sensor inputs with low-latency physical testing.
+      - Relayed data from ESP32 to AWS cloud for a Bluetooth voice feature with approximately 90% accuracy in trials.
+      - "Stack: C, PlatformIO, Arduino, ESP32, AWS."
+
+  - name: Tumor Classification based Scans
+    url: ""
+    bullets:
+      - Created a residual neural network using scikit-learn, PyTorch, and Python with an F1 score of roughly 99.
+      - Implemented a grid search using pandas, Matplotlib, and PyTorch, optimizing the residual neural network by 30%.
+      - Implemented Grad-CAM for the residual neural network using PyTorch, reaching a spatial correlation of 0.67.
+      - "Stack: Python, PyTorch, scikit-learn, pandas."
+
+  - name: Canvas-Notion
+    url: ""
+    bullets:
+      - Made a Python sync engine to automate Canvas-to-Notion task tracking, using REST APIs and GitHub Actions.
+      - Engineered metadata transformation pipeline to calculate task priority and effort using custom heuristics.
+      - Implemented idempotent logic with Canvas Assignment IDs to ensure consistency and prevent duplicate entries.
+      - "Stack: Python, Canvas API, Notion API, GitHub Actions."
+
+skills:
+  - category: Languages
+    items: Java, Python, C/C++, SQL, JavaScript, HTML/CSS, TypeScript, Assembly
+  - category: Frameworks
+    items: React, Node.js, Next.js, Zustand, Chakra UI, Radix UI, AWS
+  - category: Developer Tools
+    items: Git, Visual Studio, PlatformIO, PyCharm, Eclipse, Jupyter, Google Colab
+  - category: Libraries
+    items: pandas, NumPy, Matplotlib, scikit-learn, TensorFlow, DuckDB, PyTorch

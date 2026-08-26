@@ -1,0 +1,26 @@
+company: Stripe
+title: Backend Engineer
+portal_url: https://stripe.com/jobs/listing/backend-engineer
+description: |
+  Stripe is looking for a Backend Engineer to design and build APIs that
+  move money. You will work in Python and TypeScript, own services end to
+  end, and care about reliability, observability, and clear interfaces.
+
+  Responsibilities:
+  - Design and ship backend services used by millions of businesses
+  - Improve reliability and performance of existing payment APIs
+  - Collaborate with product and infrastructure teams
+
+  Requirements:
+  - Experience building production backend systems
+  - Comfortable with Python or a similar language
+  - Strong communication and written design skills
+notes: Sample job — copy this file into jobs/ (not jobs/samples/) to generate.
+# Optional:
+# starts: Summer 2027
+# graduation: June 2027
+# questions:
+#   - prompt: Why do you want to work at Stripe?
+#     max_length: 2000
+#   - prompt: What is your favorite project and why?
+#     max_length: 200
