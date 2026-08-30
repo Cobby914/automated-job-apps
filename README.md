@@ -70,6 +70,7 @@ pip install -e .
    - `OPENAI_REVIEWER_MODEL` — cheaper model for the first semantic pass
    - `OPENAI_ESCALATION_MODEL` — strong reviewer only when something is flagged
    - `OPENAI_REPAIR_MODEL` — cheaper model for tiny bullet/paragraph repairs
+   - `OPENAI_REASONING_EFFORT` — GPT-5/o-series Responses API effort (`none`/`minimal`/`low`/`medium`/`high`). Role overrides: `OPENAI_WRITER_REASONING_EFFORT`, `OPENAI_REVIEWER_REASONING_EFFORT`, `OPENAI_REPAIR_REASONING_EFFORT`, `OPENAI_ESCALATION_REASONING_EFFORT`
    - `LLM_PROVIDER` can force `openai`, `anthropic`, or `cursor`
    - `LLM_REVIEWER_PROVIDER` can send review to a different provider
    - `LLM_MAX_RETRIES`, `LLM_RETRY_BASE_SECONDS`, `LLM_DAILY_BUDGET_USD`
@@ -157,7 +158,7 @@ Shared telemetry (gitignored under `output/`):
 
 Do not add more architecture until you have measured those numbers on a real sample.
 
-Duplicate postings (same portal URL with tracking parameters stripped, or same company + title + whitespace-normalized description) are skipped. A later posting at the same company/title with a substantially different description can reuse the previous `ApplicationPlan` rankings and skill selection, then still do job-specific writing.
+Duplicate postings (same portal URL with tracking parameters stripped, or same company + title + whitespace-normalized description) are skipped. A later posting at the same company and title reuses the previous `ApplicationPlan` only when the description is similar enough (default ≥ 0.65) but not a near-duplicate (< 0.92).
 
 Failures leave the YAML in place and write `*.error.txt` with a **failure category**:
 

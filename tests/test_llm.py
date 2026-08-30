@@ -4,13 +4,23 @@ import os
 import sys
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import MagicMock, patch
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jobapps.career import load_career_bank
+from jobapps.config import openai_reasoning_effort
 from jobapps.generate import review_materials
-from jobapps.llm import anthropic_model_id, estimate_cost_usd, extract_json, resolve_provider
+from jobapps.llm import (
+    anthropic_model_id,
+    begin_usage_collection,
+    estimate_cost_usd,
+    extract_json,
+    generate_structured,
+    reset_usage_collection,
+    resolve_provider,
+    usage_records,
+)
 from jobapps.models import (
     Experience,
     Job,
@@ -83,6 +93,97 @@ class LlmProviderTests(unittest.TestCase):
         self.assertAlmostEqual(uncached, 2.00)
         self.assertAlmostEqual(cached, 0.50)
         self.assertLess(cached, uncached)
+
+    def test_reasoning_effort_uses_role_override(self) -> None:
+        env = {
+            "OPENAI_REASONING_EFFORT": "medium",
+            "OPENAI_WRITER_REASONING_EFFORT": "",
+            "OPENAI_REVIEWER_REASONING_EFFORT": "low",
+            "OPENAI_REPAIR_REASONING_EFFORT": "minimal",
+            "OPENAI_ESCALATION_REASONING_EFFORT": "high",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            self.assertEqual(openai_reasoning_effort("resume_write"), "medium")
+            self.assertEqual(openai_reasoning_effort("review"), "low")
+            self.assertEqual(openai_reasoning_effort("bullet_shorten"), "minimal")
+            self.assertEqual(openai_reasoning_effort("review_escalation"), "high")
+
+    def test_structured_gpt5_uses_responses_reasoning(self) -> None:
+        parsed = ReviewResult(approved=True, summary="ok", issues=[])
+        usage = MagicMock()
+        usage.prompt_tokens = 0
+        usage.completion_tokens = 0
+        usage.input_tokens = 12
+        usage.output_tokens = 8
+        usage.prompt_tokens_details = None
+        usage.completion_tokens_details = None
+        usage.input_tokens_details = MagicMock(cached_tokens=3)
+        usage.output_tokens_details = MagicMock(reasoning_tokens=5)
+        response = MagicMock(output_parsed=parsed, usage=usage, choices=[])
+        client = MagicMock()
+        client.responses.parse.return_value = response
+        env = {
+            "OPENAI_API_KEY": "sk-test",
+            "OPENAI_REASONING_EFFORT": "low",
+            "LLM_MAX_RETRIES": "0",
+        }
+        begin_usage_collection()
+        try:
+            with patch.dict(os.environ, env, clear=False):
+                with patch("jobapps.llm._openai_client", return_value=client):
+                    result = generate_structured(
+                        system="sys",
+                        user="write it",
+                        model="gpt-5.6",
+                        schema=ReviewResult,
+                        purpose="resume_write",
+                    )
+            self.assertTrue(result.approved)
+            kwargs = client.responses.parse.call_args.kwargs
+            self.assertEqual(kwargs["model"], "gpt-5.6")
+            self.assertEqual(kwargs["instructions"], "sys")
+            self.assertEqual(kwargs["input"], "write it")
+            self.assertIs(kwargs["text_format"], ReviewResult)
+            self.assertEqual(kwargs["reasoning"], {"effort": "low"})
+            records = usage_records()
+            self.assertEqual(records[0].input_tokens, 12)
+            self.assertEqual(records[0].cached_input_tokens, 3)
+            self.assertEqual(records[0].output_tokens, 8)
+            self.assertEqual(records[0].reasoning_tokens, 5)
+        finally:
+            reset_usage_collection()
+
+    def test_structured_gpt41_omits_reasoning(self) -> None:
+        parsed = ReviewResult(approved=True, summary="ok", issues=[])
+        usage = MagicMock(
+            prompt_tokens=4,
+            completion_tokens=2,
+            input_tokens=0,
+            output_tokens=0,
+            prompt_tokens_details=None,
+            completion_tokens_details=None,
+            input_tokens_details=None,
+            output_tokens_details=None,
+        )
+        response = MagicMock(output_parsed=parsed, usage=usage, choices=[])
+        client = MagicMock()
+        client.responses.parse.return_value = response
+        env = {
+            "OPENAI_API_KEY": "sk-test",
+            "OPENAI_REASONING_EFFORT": "high",
+            "LLM_MAX_RETRIES": "0",
+        }
+        with patch.dict(os.environ, env, clear=False):
+            with patch("jobapps.llm._openai_client", return_value=client):
+                generate_structured(
+                    system="sys",
+                    user="write it",
+                    model="gpt-4.1",
+                    schema=ReviewResult,
+                    purpose="resume_write",
+                )
+        kwargs = client.responses.parse.call_args.kwargs
+        self.assertNotIn("reasoning", kwargs)
 
 
 class CheckerEscalationTests(unittest.TestCase):

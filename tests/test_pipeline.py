@@ -10,9 +10,10 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jobapps.career import load_career_bank
-from jobapps.dedup import find_duplicate, job_fingerprint, strip_tracking_params
+from jobapps.dedup import find_duplicate, find_reusable_plan, job_fingerprint, strip_tracking_params
 from jobapps.errors import INVALID_PROVENANCE, PipelineError
 from jobapps.models import (
+    ApplicationPlan,
     DraftExperience,
     DraftProject,
     DraftResume,
@@ -129,6 +130,45 @@ class DedupTests(unittest.TestCase):
                     found = find_duplicate(job)
             self.assertIsNotNone(found)
             self.assertEqual(found.name, "acme.yaml")
+
+    def test_reusable_plan_requires_minimum_similarity(self) -> None:
+        original = Job(
+            company="Stripe",
+            title="Backend Engineer",
+            description="Python TypeScript PostgreSQL REST APIs Node.js.",
+        )
+        similar = original.model_copy(
+            update={
+                "description": "Python TypeScript PostgreSQL REST APIs Node.js. Also Kafka."
+            }
+        )
+        unrelated = original.model_copy(
+            update={
+                "description": "Design visual brand assets in Figma and run marketing campaigns."
+            }
+        )
+        plan = ApplicationPlan(template="swe", experience_ids=["mk-lending"])
+        with TemporaryDirectory() as tmp:
+            folder = Path(tmp) / "stripe-backend"
+            (folder / "inputs").mkdir(parents=True)
+            (folder / "meta").mkdir()
+            (folder / "inputs" / "job.yaml").write_text(
+                "company: Stripe\ntitle: Backend Engineer\n"
+                "description: Python TypeScript PostgreSQL REST APIs Node.js.\n",
+                encoding="utf-8",
+            )
+            (folder / "meta" / "application_plan.json").write_text(
+                plan.model_dump_json(),
+                encoding="utf-8",
+            )
+            with patch("jobapps.dedup.OUTPUT_DIR", Path(tmp)):
+                reused = find_reusable_plan(similar)
+                skipped = find_reusable_plan(unrelated)
+                duplicate = find_reusable_plan(original)
+        self.assertIsNotNone(reused)
+        self.assertEqual(reused.experience_ids, ["mk-lending"])
+        self.assertIsNone(skipped)
+        self.assertIsNone(duplicate)
 
 
 class PipelineIntegrationTests(unittest.TestCase):

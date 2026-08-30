@@ -176,5 +176,42 @@ def llm_daily_budget_usd() -> float | None:
     return float(raw)
 
 
+_REASONING_EFFORTS = frozenset(
+    {"none", "minimal", "low", "medium", "high", "xhigh", "max"}
+)
+
+
+def _purpose_reasoning_role(purpose: str) -> str:
+    key = purpose.strip().lower()
+    if "escalat" in key:
+        return "escalation"
+    if "review" in key:
+        return "reviewer"
+    if any(token in key for token in ("repair", "shorten", "fit")):
+        return "repair"
+    return "writer"
+
+
+def openai_reasoning_effort(purpose: str = "") -> str | None:
+    """Responses API reasoning.effort for GPT-5 / o-series. None = model default."""
+    role = _purpose_reasoning_role(purpose)
+    overrides = {
+        "writer": "OPENAI_WRITER_REASONING_EFFORT",
+        "reviewer": "OPENAI_REVIEWER_REASONING_EFFORT",
+        "repair": "OPENAI_REPAIR_REASONING_EFFORT",
+        "escalation": "OPENAI_ESCALATION_REASONING_EFFORT",
+    }
+    raw = _env(overrides.get(role, "")) or _env("OPENAI_REASONING_EFFORT")
+    if not raw:
+        return None
+    key = raw.casefold()
+    if key not in _REASONING_EFFORTS:
+        raise RuntimeError(
+            f"Invalid reasoning effort {raw!r}. Use one of: "
+            + ", ".join(sorted(_REASONING_EFFORTS))
+        )
+    return key
+
+
 def notion_configured() -> bool:
     return bool(_env("NOTION_TOKEN") and _env("NOTION_DATABASE_ID"))

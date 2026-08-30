@@ -39,6 +39,22 @@ def numeric_claim_tokens(text: str) -> list[str]:
         tokens.append(canonical_number(number))
     return tokens
 
+
+def numeric_percent_flags(text: str) -> dict[str, bool]:
+    """Canonical number -> True if it appears at least once as a percent."""
+    flags: dict[str, bool] = {}
+    raw = text or ""
+    for match in _NUMERIC_CLAIM_RE.finditer(raw):
+        number = match.group(1)
+        if _YEAR_RE.fullmatch(number.replace(",", "")):
+            continue
+        key = canonical_number(number)
+        unit = (match.group(2) or "").strip()
+        after = raw[match.end() : match.end() + 16].lstrip().casefold()
+        is_pct = unit == "%" or after.startswith("percent")
+        flags[key] = flags.get(key, False) or is_pct
+    return flags
+
 _SKILLS_HEADING_RE = re.compile(r"^##\s+(.+?)\s*$")
 _SKILLS_BULLET_RE = re.compile(r"^-\s+(.+?)\s*$")
 _SKILLS_BOLD_LINE_RE = re.compile(r"^\*\*(.+?):\*\*\s*(.+?)\s*$")

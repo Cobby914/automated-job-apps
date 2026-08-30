@@ -6,7 +6,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
-from jobapps.career import CanonicalBullet, _validate_canonical_sources, load_career_bank
+from jobapps.career import CanonicalBullet, Metric, _validate_canonical_sources, load_career_bank
 from jobapps.models import numeric_claim_tokens
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -100,6 +100,38 @@ class CareerBankTests(unittest.TestCase):
         self.assertEqual(genome.metrics[0].kind, "absolute")
         self.assertIn("0.40", genome.metrics[0].text)
         self.assertIn("0.70", genome.metrics[0].text)
+
+    def test_metric_requires_kind(self) -> None:
+        with self.assertRaises(ValueError):
+            Metric.model_validate({"id": "x.metric.1", "text": "Grew 30%."})
+        with self.assertRaises(ValueError):
+            Metric.model_validate(
+                {"id": "x.metric.1", "text": "Grew 30%.", "kind": "delta"}
+            )
+
+    def test_canonical_kind_mismatch_is_rejected(self) -> None:
+        tena = self.bank.experience_by_id()["tena"]
+        broken = self.bank.model_copy(
+            update={
+                "experiences": [
+                    tena.model_copy(
+                        update={
+                            "bullets": [
+                                CanonicalBullet(
+                                    id="bad.kind.1",
+                                    text="Drove 30 extra visits after launch.",
+                                    sources=[tena.metrics[0].id],
+                                )
+                            ]
+                        }
+                    )
+                ]
+            }
+        )
+        with self.assertRaises(ValueError) as ctx:
+            _validate_canonical_sources(broken)
+        self.assertIn("relative metric", str(ctx.exception))
+        self.assertIn("percent", str(ctx.exception).casefold())
 
 
 if __name__ == "__main__":

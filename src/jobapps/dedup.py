@@ -27,6 +27,7 @@ _TRACKING_KEYS = frozenset(
     }
 )
 _NEAR_DUPLICATE_RATIO = 0.92
+PLAN_REUSE_MIN_SIMILARITY = 0.65
 
 
 def normalize_text(text: str) -> str:
@@ -65,14 +66,18 @@ def job_fingerprint(job: Job) -> str:
     return f"post:{company}|{title}|{digest}"
 
 
-def descriptions_similar(left: str, right: str, threshold: float = _NEAR_DUPLICATE_RATIO) -> bool:
+def description_similarity_ratio(left: str, right: str) -> float:
     a = normalize_text(left)
     b = normalize_text(right)
     if not a or not b:
-        return False
+        return 0.0
     if a == b:
-        return True
-    return SequenceMatcher(None, a, b).ratio() >= threshold
+        return 1.0
+    return SequenceMatcher(None, a, b).ratio()
+
+
+def descriptions_similar(left: str, right: str, threshold: float = _NEAR_DUPLICATE_RATIO) -> bool:
+    return description_similarity_ratio(left, right) >= threshold
 
 
 def _job_from_yaml(path: Path) -> Job | None:
@@ -130,7 +135,7 @@ def find_duplicate(job: Job, *, exclude_output: Path | None = None) -> Path | No
 
 
 def find_reusable_plan(job: Job, *, exclude_output: Path | None = None) -> ApplicationPlan | None:
-    """Reuse rankings/skills from a similar same-company posting that is not a duplicate."""
+    """Reuse rankings from a same-company posting similar enough to share a plan."""
     company = normalize_text(job.company)
     title = normalize_text(job.title)
     exclude = exclude_output.resolve() if exclude_output is not None else None
@@ -152,7 +157,10 @@ def find_reusable_plan(job: Job, *, exclude_output: Path | None = None) -> Appli
             continue
         if normalize_text(previous.title) != title:
             continue
-        if descriptions_similar(previous.description, job.description):
+        ratio = description_similarity_ratio(previous.description, job.description)
+        if ratio < PLAN_REUSE_MIN_SIMILARITY:
+            continue
+        if ratio >= _NEAR_DUPLICATE_RATIO:
             continue
         try:
             return ApplicationPlan.model_validate(json.loads(plan_path.read_text(encoding="utf-8")))

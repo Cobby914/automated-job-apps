@@ -2,7 +2,13 @@
 
 from __future__ import annotations
 
-from jobapps.career import CareerBank, CareerProfile, ExperienceRecord, ProjectRecord
+from jobapps.career import (
+    CareerBank,
+    CareerProfile,
+    ExperienceRecord,
+    ProjectRecord,
+    metric_kind_issues,
+)
 from jobapps.models import (
     ApplicationAnswersResult,
     ApplicationPlan,
@@ -174,12 +180,15 @@ def _metric_provenance_issues(
     for item in cited_metrics:
         metric_nums.update(numeric_claim_tokens(item.text))
     missing = [claim for claim in claims if claim not in metric_nums]
-    if not missing:
-        return []
+    if missing:
+        return [
+            f"{label} bullet {index + 1} numeric claims "
+            + ", ".join(missing)
+            + " are not supported by cited metrics."
+        ]
     return [
-        f"{label} bullet {index + 1} numeric claims "
-        + ", ".join(missing)
-        + " are not supported by cited metrics."
+        f"{label} bullet {index + 1} {issue}."
+        for issue in metric_kind_issues(bullet.text, cited_metrics)
     ]
 
 

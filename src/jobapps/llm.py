@@ -18,6 +18,7 @@ from jobapps.config import (
     llm_daily_budget_usd,
     llm_max_retries,
     llm_retry_base_seconds,
+    openai_reasoning_effort,
     require_env,
 )
 from jobapps.errors import PROVIDER_FAILURE, PipelineError
@@ -292,11 +293,17 @@ def _complete_once(
 
 def _usage_from_openai(response: object, model: str, latency_ms: float, purpose: str) -> UsageRecord:
     usage = getattr(response, "usage", None)
-    input_tokens = int(getattr(usage, "prompt_tokens", 0) or 0)
-    output_tokens = int(getattr(usage, "completion_tokens", 0) or 0)
-    details = getattr(usage, "prompt_tokens_details", None)
+    input_tokens = int(getattr(usage, "prompt_tokens", 0) or getattr(usage, "input_tokens", 0) or 0)
+    output_tokens = int(
+        getattr(usage, "completion_tokens", 0) or getattr(usage, "output_tokens", 0) or 0
+    )
+    details = getattr(usage, "prompt_tokens_details", None) or getattr(
+        usage, "input_tokens_details", None
+    )
     cached = int(getattr(details, "cached_tokens", 0) or 0) if details is not None else 0
-    completion_details = getattr(usage, "completion_tokens_details", None)
+    completion_details = getattr(usage, "completion_tokens_details", None) or getattr(
+        usage, "output_tokens_details", None
+    )
     reasoning = (
         int(getattr(completion_details, "reasoning_tokens", 0) or 0)
         if completion_details is not None
@@ -315,6 +322,113 @@ def _usage_from_openai(response: object, model: str, latency_ms: float, purpose:
     )
     _record_usage(record)
     return record
+
+
+def _openai_client():
+    try:
+        from openai import OpenAI
+    except ImportError as error:
+        raise ProviderError("The openai package is required for GPT models.") from error
+    return OpenAI(api_key=require_env("OPENAI_API_KEY"))
+
+
+def _model_supports_reasoning(model: str) -> bool:
+    key = model.strip().lower()
+    return key.startswith(("gpt-5", "o1", "o3", "o4"))
+
+
+def _openai_reasoning_kwargs(model: str, purpose: str) -> dict[str, object]:
+    if not _model_supports_reasoning(model):
+        return {}
+    effort = openai_reasoning_effort(purpose)
+    if not effort:
+        return {}
+    return {"reasoning": {"effort": effort}}
+
+
+def _complete_openai(system: str, user: str, model: str, purpose: str) -> str:
+    client = _openai_client()
+    extra = _openai_reasoning_kwargs(model, purpose)
+    started = time.perf_counter()
+    responses = getattr(client, "responses", None)
+    try:
+        if responses is not None:
+            kwargs: dict[str, object] = {"model": model, "input": user}
+            if system:
+                kwargs["instructions"] = system
+            kwargs.update(extra)
+            response = client.responses.create(**kwargs)
+        else:
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": user})
+            response = client.chat.completions.create(model=model, messages=messages)
+    except Exception as error:
+        raise _wrap_provider_exception("openai", model, error) from error
+    latency = (time.perf_counter() - started) * 1000
+    _usage_from_openai(response, model, latency, purpose)
+    text = (getattr(response, "output_text", None) or "").strip()
+    if not text:
+        choices = getattr(response, "choices", None) or []
+        if choices:
+            text = (choices[0].message.content or "").strip()
+    if not text:
+        raise ProviderError(f"OpenAI returned no text ({model}).")
+    return text
+
+
+def _openai_structured(system: str, user: str, model: str, schema: type[T], purpose: str) -> T:
+    client = _openai_client()
+    extra = _openai_reasoning_kwargs(model, purpose)
+    started = time.perf_counter()
+    responses = getattr(client, "responses", None)
+    try:
+        if responses is not None and hasattr(responses, "parse"):
+            kwargs: dict[str, object] = {
+                "model": model,
+                "input": user,
+                "text_format": schema,
+            }
+            if system:
+                kwargs["instructions"] = system
+            kwargs.update(extra)
+            response = client.responses.parse(**kwargs)
+        else:
+            messages = []
+            if system:
+                messages.append({"role": "system", "content": system})
+            messages.append({"role": "user", "content": user})
+            parse = getattr(getattr(client, "beta", None), "chat", None)
+            if parse is not None:
+                response = client.beta.chat.completions.parse(
+                    model=model,
+                    messages=messages,
+                    response_format=schema,
+                )
+            else:
+                response = client.chat.completions.parse(
+                    model=model,
+                    messages=messages,
+                    response_format=schema,
+                )
+    except Exception as error:
+        raise _wrap_provider_exception("openai", model, error) from error
+    latency = (time.perf_counter() - started) * 1000
+    _usage_from_openai(response, model, latency, purpose)
+    parsed = getattr(response, "output_parsed", None)
+    if parsed is None:
+        choices = getattr(response, "choices", None) or [None]
+        message = getattr(choices[0], "message", None)
+        parsed = getattr(message, "parsed", None)
+        if parsed is None:
+            refusal = getattr(message, "refusal", None) if message is not None else None
+            raise ProviderError(
+                f"OpenAI structured output was empty ({model}): {refusal or 'no parsed object'}."
+            )
+    if isinstance(parsed, schema):
+        return parsed
+    return schema.model_validate(parsed)
 
 
 def _usage_from_anthropic(response: object, model: str, latency_ms: float, purpose: str) -> UsageRecord:
@@ -336,68 +450,6 @@ def _usage_from_anthropic(response: object, model: str, latency_ms: float, purpo
     )
     _record_usage(record)
     return record
-
-
-def _complete_openai(system: str, user: str, model: str, purpose: str) -> str:
-    try:
-        from openai import OpenAI
-    except ImportError as error:
-        raise ProviderError("The openai package is required for GPT models.") from error
-    client = OpenAI(api_key=require_env("OPENAI_API_KEY"))
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": user})
-    started = time.perf_counter()
-    try:
-        response = client.chat.completions.create(model=model, messages=messages)
-    except Exception as error:
-        raise _wrap_provider_exception("openai", model, error) from error
-    latency = (time.perf_counter() - started) * 1000
-    _usage_from_openai(response, model, latency, purpose)
-    text = (response.choices[0].message.content or "").strip()
-    if not text:
-        raise ProviderError(f"OpenAI returned no text ({model}).")
-    return text
-
-
-def _openai_structured(system: str, user: str, model: str, schema: type[T], purpose: str) -> T:
-    try:
-        from openai import OpenAI
-    except ImportError as error:
-        raise ProviderError("The openai package is required for GPT models.") from error
-    client = OpenAI(api_key=require_env("OPENAI_API_KEY"))
-    messages = []
-    if system:
-        messages.append({"role": "system", "content": system})
-    messages.append({"role": "user", "content": user})
-    started = time.perf_counter()
-    parse = getattr(getattr(client, "beta", None), "chat", None)
-    try:
-        if parse is not None:
-            response = client.beta.chat.completions.parse(
-                model=model,
-                messages=messages,
-                response_format=schema,
-            )
-        else:
-            response = client.chat.completions.parse(
-                model=model,
-                messages=messages,
-                response_format=schema,
-            )
-    except Exception as error:
-        raise _wrap_provider_exception("openai", model, error) from error
-    latency = (time.perf_counter() - started) * 1000
-    _usage_from_openai(response, model, latency, purpose)
-    message = response.choices[0].message
-    parsed = getattr(message, "parsed", None)
-    if parsed is None:
-        refusal = getattr(message, "refusal", None)
-        raise ProviderError(
-            f"OpenAI structured output was empty ({model}): {refusal or 'no parsed object'}."
-        )
-    return parsed
 
 
 def _complete_anthropic(system: str, user: str, model: str, cache_system: bool, purpose: str) -> str:

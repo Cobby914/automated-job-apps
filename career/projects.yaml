@@ -30,7 +30,7 @@
   metrics:
     - id: genome-sequencing.metric.1
       kind: absolute
-      text: Improved classification F1 from approximately 0.40 to 0.70 (absolute F1 scores, not a 70% relative gain).
+      text: Improved classification F1 from approximately 0.40 to 0.70 (absolute F1 scores).
   bullets:
     - id: genome-sequencing.bullet.1
       text: Constructed a pipeline conjoining Humsavar and dbNSFP using DuckDB and pandas, raising F1 from 0.40 to 0.70.

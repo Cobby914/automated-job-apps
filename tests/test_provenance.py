@@ -179,6 +179,50 @@ class ProvenanceTests(unittest.TestCase):
         )
         self.assertEqual(source_issues(draft, plan, self.bank), [])
 
+    def test_validate_sources_rejects_kind_conversion(self) -> None:
+        job = Job(
+            company="Stripe",
+            title="Backend Engineer",
+            description="Python TypeScript PostgreSQL REST APIs Node.js.",
+        )
+        plan = build_application_plan(job, self.bank)
+        tena = self.bank.experience_by_id()["tena"]
+        lending = self.bank.experience_by_id()["mk-lending"]
+        plan = plan.model_copy(update={"experience_ids": ["tena", "mk-lending"]})
+        relative_as_count = DraftResume(
+            experience=[
+                DraftExperience(
+                    company=tena.company,
+                    role=tena.role,
+                    bullets=[
+                        SourcedBullet(
+                            text="Drove 30 extra public site visits after launch.",
+                            sources=[tena.metrics[0].id],
+                        )
+                    ],
+                )
+            ]
+        )
+        issues = validate_sources(relative_as_count, plan, self.bank)
+        self.assertTrue(any("relative metric" in item for item in issues))
+
+        count_as_percent = DraftResume(
+            experience=[
+                DraftExperience(
+                    company=lending.company,
+                    role=lending.role,
+                    bullets=[
+                        SourcedBullet(
+                            text="Built dashboards used by 5% more managers.",
+                            sources=[lending.metrics[2].id],
+                        )
+                    ],
+                )
+            ]
+        )
+        issues = validate_sources(count_as_percent, plan, self.bank)
+        self.assertTrue(any("count metric" in item and "percentage" in item for item in issues))
+
 
 if __name__ == "__main__":
     unittest.main()

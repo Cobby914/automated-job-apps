@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from functools import lru_cache
 from pathlib import Path
+from typing import Literal
 
 import yaml
 from pydantic import BaseModel, Field, field_validator
@@ -15,24 +16,57 @@ from jobapps.models import (
     SkillGroup,
     allowed_skill_names,
     numeric_claim_tokens,
+    numeric_percent_flags,
     parse_skills_bank,
 )
 
+MetricKind = Literal["absolute", "relative", "count"]
 
-class SourcedText(BaseModel):
+
+class Fact(BaseModel):
     id: str
     text: str
-    kind: str = ""
+
+
+class Metric(BaseModel):
+    id: str
+    text: str
+    kind: MetricKind
 
     @field_validator("kind", mode="before")
     @classmethod
     def normalize_kind(cls, value: object) -> str:
         key = str(value or "").strip().casefold()
-        if key and key not in {"absolute", "relative", "count"}:
+        if key not in {"absolute", "relative", "count"}:
             raise ValueError(
-                f"kind must be absolute, relative, count, or empty; got {value!r}"
+                f"metric kind must be absolute, relative, or count; got {value!r}"
             )
         return key
+
+
+def metric_kind_issues(bullet_text: str, metrics: list[Metric]) -> list[str]:
+    """Reject restating a relative metric as absolute (or the reverse)."""
+    bullet_pct = numeric_percent_flags(bullet_text)
+    issues: list[str] = []
+    for metric in metrics:
+        metric_pct = numeric_percent_flags(metric.text)
+        for number, is_pct in metric_pct.items():
+            if number not in bullet_pct:
+                continue
+            restated_pct = bullet_pct[number]
+            if is_pct == restated_pct:
+                continue
+            if metric.kind == "relative" and is_pct and not restated_pct:
+                issues.append(f"relative metric {metric.id} restated without a percent")
+            elif metric.kind == "relative" and not is_pct and restated_pct:
+                issues.append(f"relative metric {metric.id} restated as a percentage")
+            elif metric.kind in {"absolute", "count"} and not is_pct and restated_pct:
+                issues.append(f"{metric.kind} metric {metric.id} restated as a percentage")
+            elif metric.kind in {"absolute", "count"} and is_pct and not restated_pct:
+                issues.append(
+                    f"{metric.kind} metric {metric.id} restated without a percent"
+                )
+    return issues
 
 
 class CanonicalBullet(BaseModel):
@@ -52,8 +86,8 @@ class ExperienceRecord(BaseModel):
     technologies: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
-    facts: list[SourcedText] = Field(default_factory=list)
-    metrics: list[SourcedText] = Field(default_factory=list)
+    facts: list[Fact] = Field(default_factory=list)
+    metrics: list[Metric] = Field(default_factory=list)
     bullets: list[CanonicalBullet] = Field(default_factory=list)
     tracks: list[str] = Field(default_factory=list)
 
@@ -91,8 +125,8 @@ class ProjectRecord(BaseModel):
     technologies: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
-    facts: list[SourcedText] = Field(default_factory=list)
-    metrics: list[SourcedText] = Field(default_factory=list)
+    facts: list[Fact] = Field(default_factory=list)
+    metrics: list[Metric] = Field(default_factory=list)
     bullets: list[CanonicalBullet] = Field(default_factory=list)
     stack: str = ""
     tracks: list[str] = Field(default_factory=list)
@@ -211,9 +245,6 @@ def _validate_canonical_sources(bank: CareerBank) -> None:
     errors: list[str] = []
     for record in [*bank.experiences, *bank.projects]:
         known = record.fact_metric_ids()
-        for metric in record.metrics:
-            if not metric.kind:
-                errors.append(f"{metric.id} is missing kind (absolute, relative, or count)")
         for bullet in record.bullets:
             if bullet.text.strip().lower().startswith("stack:"):
                 continue
@@ -243,6 +274,11 @@ def _validate_canonical_sources(bank: CareerBank) -> None:
                     + ", ".join(missing)
                     + " are not supported by cited metrics"
                 )
+                continue
+            errors.extend(
+                f"{bullet.id} {issue}"
+                for issue in metric_kind_issues(bullet.text, cited_metrics)
+            )
     if errors:
         raise ValueError("Career bank source errors: " + "; ".join(errors[:12]))
 
