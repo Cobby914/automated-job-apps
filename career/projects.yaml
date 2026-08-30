@@ -29,7 +29,8 @@
       text: Demonstrated that improving the underlying dataset and feature pipeline could materially improve downstream model performance rather than relying solely on architecture changes.
   metrics:
     - id: genome-sequencing.metric.1
-      text: Improved model F1 from approximately 0.40 to 0.70.
+      kind: absolute
+      text: Improved classification F1 from approximately 0.40 to 0.70 (absolute F1 scores, not a 70% relative gain).
   bullets:
     - id: genome-sequencing.bullet.1
       text: Constructed a pipeline conjoining Humsavar and dbNSFP using DuckDB and pandas, raising F1 from 0.40 to 0.70.
@@ -75,17 +76,20 @@
       text: Implemented Grad-CAM to investigate which portions of medical images influenced model predictions.
   metrics:
     - id: tumor-classification.metric.1
-      text: Achieved approximately 99% F1.
+      kind: absolute
+      text: Achieved an absolute F1 score of approximately 0.99 (99% F1), not a 99% relative improvement.
     - id: tumor-classification.metric.2
-      text: Model optimization improved performance approximately 30%.
+      kind: relative
+      text: Hyperparameter/grid-search optimization improved residual-network F1 by approximately 30% relative to the untuned baseline.
     - id: tumor-classification.metric.3
-      text: Grad-CAM analysis reached approximately 0.67 correlation.
+      kind: absolute
+      text: Grad-CAM analysis reached approximately 0.67 spatial correlation.
   bullets:
     - id: tumor-classification.bullet.1
       text: Created a residual neural network using scikit-learn, PyTorch, and Python with an F1 score of roughly 99%.
       sources: [tumor-classification.fact.2, tumor-classification.metric.1]
     - id: tumor-classification.bullet.2
-      text: Implemented a grid search using pandas, Matplotlib, and PyTorch, optimizing the residual network by 30%.
+      text: Implemented a grid search using pandas, Matplotlib, and PyTorch, improving residual-network F1 by 30% vs the untuned baseline.
       sources: [tumor-classification.fact.2, tumor-classification.metric.2]
     - id: tumor-classification.bullet.3
       text: Implemented Grad-CAM for the residual neural network using PyTorch, reaching a spatial correlation of 0.67.
@@ -166,8 +170,10 @@
       text: Built interface elements including navigation components, modals, and cards that were reused across the application by other developers.
   metrics:
     - id: reel-in.metric.1
+      kind: count
       text: Platform used by approximately 50 students.
     - id: reel-in.metric.2
+      kind: count
       text: Components reused by 5+ developers.
   bullets:
     - id: reel-in.bullet.1
@@ -216,9 +222,11 @@
       text: Worked directly with physical hardware debugging and developed cloud/Bluetooth functionality through the ESP32.
   metrics:
     - id: smart-step.metric.1
-      text: Approximately 80% obstacle/elevation detection accuracy.
+      kind: absolute
+      text: Approximately 80% obstacle/elevation detection accuracy (absolute accuracy, not an 80% relative gain).
     - id: smart-step.metric.2
-      text: Approximately 90% accuracy for the Bluetooth/voice feature.
+      kind: absolute
+      text: Approximately 90% accuracy for the Bluetooth/voice feature in trials (absolute accuracy).
   bullets:
     - id: smart-step.bullet.1
       text: Created a smart white cane detecting elevation changes and incoming objects using T.O.F and ultrasonic sensors.
@@ -298,10 +306,13 @@
       text: Diagnosed reward hacking including sliding, crawling, falling sideways, and other strategies that increased reward while failing intended locomotion.
   metrics:
     - id: unity-rl.metric.1
+      kind: count
       text: Controlled approximately 16 articulated joints.
     - id: unity-rl.metric.2
+      kind: count
       text: Stable locomotion required 45M+ training steps.
     - id: unity-rl.metric.3
+      kind: count
       text: Later self-play experimentation ran for approximately 25M steps.
   bullets:
     - id: unity-rl.bullet.1

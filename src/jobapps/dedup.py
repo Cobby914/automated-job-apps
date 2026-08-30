@@ -1,26 +1,78 @@
-"""Detect already-completed applications so workers do not spend another LLM run."""
+"""Detect already-completed applications and similar postings worth reusing."""
 
 from __future__ import annotations
 
 import hashlib
+import json
+from difflib import SequenceMatcher
 from pathlib import Path
+from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from jobapps.config import OUTPUT_DIR, PROCESSED_DIR
-from jobapps.models import Job, load_job
+from jobapps.models import ApplicationPlan, Job, load_job
+
+_TRACKING_KEYS = frozenset(
+    {
+        "fbclid",
+        "gclid",
+        "gclsrc",
+        "yclid",
+        "msclkid",
+        "igshid",
+        "mc_cid",
+        "mc_eid",
+        "ref",
+        "ref_src",
+        "source",
+    }
+)
+_NEAR_DUPLICATE_RATIO = 0.92
+
+
+def normalize_text(text: str) -> str:
+    return " ".join((text or "").casefold().split())
+
+
+def strip_tracking_params(url: str) -> str:
+    raw = (url or "").strip()
+    if not raw:
+        return ""
+    parts = urlsplit(raw)
+    kept = []
+    for key, value in parse_qsl(parts.query, keep_blank_values=True):
+        low = key.casefold()
+        if low in _TRACKING_KEYS or low.startswith("utm_"):
+            continue
+        kept.append((key, value))
+    cleaned = urlunsplit(
+        (parts.scheme, parts.netloc, parts.path.rstrip("/"), urlencode(kept), "")
+    )
+    return cleaned.casefold()
 
 
 def normalize_portal_url(url: str) -> str:
-    return url.strip().casefold().rstrip("/")
+    cleaned = strip_tracking_params(url)
+    return cleaned or url.strip().casefold().rstrip("/")
 
 
 def job_fingerprint(job: Job) -> str:
     url = normalize_portal_url(job.portal_url)
     if url:
         return f"url:{url}"
-    company = " ".join(job.company.casefold().split())
-    title = " ".join(job.title.casefold().split())
-    digest = hashlib.sha256(job.description.encode("utf-8")).hexdigest()[:16]
+    company = normalize_text(job.company)
+    title = normalize_text(job.title)
+    digest = hashlib.sha256(normalize_text(job.description).encode("utf-8")).hexdigest()[:16]
     return f"post:{company}|{title}|{digest}"
+
+
+def descriptions_similar(left: str, right: str, threshold: float = _NEAR_DUPLICATE_RATIO) -> bool:
+    a = normalize_text(left)
+    b = normalize_text(right)
+    if not a or not b:
+        return False
+    if a == b:
+        return True
+    return SequenceMatcher(None, a, b).ratio() >= threshold
 
 
 def _job_from_yaml(path: Path) -> Job | None:
@@ -33,6 +85,8 @@ def _job_from_yaml(path: Path) -> Job | None:
 def find_duplicate(job: Job, *, exclude_output: Path | None = None) -> Path | None:
     """Return a completed output or processed YAML path if this posting already shipped."""
     target = job_fingerprint(job)
+    company = normalize_text(job.company)
+    title = normalize_text(job.title)
     exclude = exclude_output.resolve() if exclude_output is not None else None
 
     if PROCESSED_DIR.is_dir():
@@ -40,7 +94,15 @@ def find_duplicate(job: Job, *, exclude_output: Path | None = None) -> Path | No
             if path.suffix.lower() not in {".yaml", ".yml"}:
                 continue
             previous = _job_from_yaml(path)
-            if previous is not None and job_fingerprint(previous) == target:
+            if previous is None:
+                continue
+            if job_fingerprint(previous) == target:
+                return path
+            if (
+                normalize_text(previous.company) == company
+                and normalize_text(previous.title) == title
+                and descriptions_similar(previous.description, job.description)
+            ):
                 return path
 
     if OUTPUT_DIR.is_dir():
@@ -54,6 +116,46 @@ def find_duplicate(job: Job, *, exclude_output: Path | None = None) -> Path | No
             if not meta.is_file() or not job_yaml.is_file():
                 continue
             previous = _job_from_yaml(job_yaml)
-            if previous is not None and job_fingerprint(previous) == target:
+            if previous is None:
+                continue
+            if job_fingerprint(previous) == target:
                 return folder
+            if (
+                normalize_text(previous.company) == company
+                and normalize_text(previous.title) == title
+                and descriptions_similar(previous.description, job.description)
+            ):
+                return folder
+    return None
+
+
+def find_reusable_plan(job: Job, *, exclude_output: Path | None = None) -> ApplicationPlan | None:
+    """Reuse rankings/skills from a similar same-company posting that is not a duplicate."""
+    company = normalize_text(job.company)
+    title = normalize_text(job.title)
+    exclude = exclude_output.resolve() if exclude_output is not None else None
+    if not OUTPUT_DIR.is_dir():
+        return None
+    for folder in sorted(OUTPUT_DIR.iterdir(), reverse=True):
+        if not folder.is_dir():
+            continue
+        if exclude is not None and folder.resolve() == exclude:
+            continue
+        job_yaml = folder / "inputs" / "job.yaml"
+        plan_path = folder / "meta" / "application_plan.json"
+        if not job_yaml.is_file() or not plan_path.is_file():
+            continue
+        previous = _job_from_yaml(job_yaml)
+        if previous is None:
+            continue
+        if normalize_text(previous.company) != company:
+            continue
+        if normalize_text(previous.title) != title:
+            continue
+        if descriptions_similar(previous.description, job.description):
+            continue
+        try:
+            return ApplicationPlan.model_validate(json.loads(plan_path.read_text(encoding="utf-8")))
+        except Exception:
+            continue
     return None

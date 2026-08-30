@@ -1,29 +1,56 @@
 # Automated Job Applications
 
-Drop a job YAML into `jobs/`. The pipeline ranks your structured career bank, builds an `ApplicationPlan`, writes a tailored resume (and optional cover letter), validates the result in Python, runs a cheap then expensive semantic review, applies targeted repairs, fits the PDFs to one page, logs a Notion row, and notifies you with the portal URL and any referral match.
+Drop a job YAML into `jobs/`. The pipeline treats `career/*.yaml` as the single source of truth, ranks experiences and projects deterministically, builds an `ApplicationPlan`, writes a tailored resume (and optional cover letter), validates provenance in Python, runs a cheap then expensive semantic review, applies targeted repairs, fits the PDFs to one page, logs a Notion row, and notifies you with the portal URL and any referral match.
 
-Writing and review go through `src/jobapps/llm.py`. Direct OpenAI/Anthropic keys are preferred when set; otherwise the Cursor API is the fallback.
+Writing, review, and repair go through `src/jobapps/llm.py`. Callers never branch on OpenAI, Anthropic, or Cursor. Direct OpenAI/Anthropic keys are preferred when set; otherwise the Cursor API is the fallback.
 
 ## Architecture
 
 ```
 Job YAML
-  → duplicate fingerprint (skip if already processed)
-  → ApplicationPlan (template, ranked experiences/projects, skill whitelist)
-  → Resume draft (LLM, selected records only)
-  → Python validation (length, skills, source IDs, sections)
+  → duplicate / near-duplicate fingerprint (skip if already processed)
+  → optional plan reuse for a similar same-company posting
+  → ApplicationPlan (template, ranked ids, priorities, match explanations, skill whitelist)
+  → Resume draft (LLM, selected records only, cached career prefix)
+  → Python validation (length, skills, source IDs, numeric claims vs metric sources)
   → Semantic review (cheap checker, escalate only on issues)
-  → Targeted repair if needed
+  → Targeted repair of located bullets/paragraphs (hard retry budget)
   → Python validation again
   → One final semantic pass
-  → PDF fit (trim / shorten, no full rewrite)
-  → Fit-aware Python validation
-  → resume_final.json / cover_letter_final.json + PDFs
+  → PDF fit (deterministic trim first; LLM shorten only if needed)
+  → Re-review only if fitting used an LLM rewrite
+  → resume_final.json / cover_letter_final.json written after layout is done
+  → Screening answers checkpointed independently
+  → Notion + notification
 ```
 
-Python owns objective checks (bullet length, skill whitelist, source-ID existence, education, page count). The LLM reviewer owns subjective checks (relevance, voice, misleading claims). Repairs rewrite one located bullet or paragraph, not the whole resume.
+Python owns objective checks: bullet length, skill whitelist, section counts, page counts, duplicate detection, template choice, relevance ranking, trimming, and source-ID / metric validity. The LLM reviewer owns subjective checks (relevance, voice, misleading claims). Repairs rewrite one located bullet or paragraph, not the whole resume.
 
-Checkpoints live in `{job}.progress.json` (`planned` → `resume_drafted` → `cover_drafted` → `reviewed` → `fitted` → `complete`). A PDF failure restarts from rendering; a cover-letter failure does not regenerate the resume.
+Every generated experience/project bullet must cite at least one fact or metric ID from that same record. Unknown IDs and numeric claims that are not in the cited metrics are rejected as `invalid_provenance`.
+
+Checkpoints live in `{job}.progress.json`:
+
+`planned` → `resume_drafted` → `cover_drafted` → `reviewed` → `fitted` → `answers_generated` → `answers_validated` → `complete`
+
+A PDF failure restarts from rendering. A Notion failure does not regenerate the resume, cover letter, or answers. Re-running a completed stage overwrites the same artifacts instead of creating duplicates.
+
+## Career knowledge base
+
+| Path | What to put there |
+| --- | --- |
+| `career/profile.yaml` | Contact and education |
+| `career/experiences.yaml` | Jobs/internships with facts, metrics, canonical bullets, and source IDs |
+| `career/projects.yaml` | Projects with the same sourced structure |
+| `career/skills.yaml` | Allowed skill inventory plus recommended groups |
+| `resume_templates/*.yaml` | Track layouts (`swe`, `ai`, `default`) |
+| `resume_templates/default.tex.j2` | Resume LaTeX layout |
+| `cover_letter_templates/default.tex.j2` | Cover letter layout |
+| `cover_letter_examples/*.md` | Past cover letters — structure, length, and tone only |
+| `connections/connections.yaml` | People who could refer you, keyed by company |
+
+Metrics must declare `kind: absolute`, `relative`, or `count` so generators cannot turn a 30% relative gain into an absolute score, or F1 0.40→0.70 into “70% improvement.” Canonical bullets may only cite facts/metrics on that same record.
+
+`resume_additions/` is leftover notes and is not loaded by the generator.
 
 ## Setup
 
@@ -38,31 +65,20 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .
 ```
 
-4. Copy `.env.example` to `.env`. Add a Cursor API key from [Cursor Dashboard → Integrations](https://cursor.com/dashboard/integrations), or set `OPENAI_API_KEY` / `ANTHROPIC_API_KEY` to call those providers directly. `LLM_PROVIDER` can force `openai`, `anthropic`, or `cursor`.
+4. Copy `.env.example` to `.env`. Set provider keys and **explicit model names**. Do not rely on hidden defaults:
+   - `OPENAI_WRITER_MODEL` — strong model for the initial resume/cover letter
+   - `OPENAI_REVIEWER_MODEL` — cheaper model for the first semantic pass
+   - `OPENAI_ESCALATION_MODEL` — strong reviewer only when something is flagged
+   - `OPENAI_REPAIR_MODEL` — cheaper model for tiny bullet/paragraph repairs
+   - `LLM_PROVIDER` can force `openai`, `anthropic`, or `cursor`
+   - `LLM_REVIEWER_PROVIDER` can send review to a different provider
+   - `LLM_MAX_RETRIES`, `LLM_RETRY_BASE_SECONDS`, `LLM_DAILY_BUDGET_USD`
 5. Edit `career/` YAML with your real experiences, projects, skills, and profile.
 6. Optional Notion:
    - Create an internal integration at [notion.so/my-integrations](https://www.notion.so/my-integrations).
    - Share **one parent page** with that integration.
    - Put the token and parent page ID (or page URL) in `.env`.
    - Run `python -m jobapps setup-notion` to create the database. The database ID is written back to `.env`.
-
-## Fill in your materials
-
-| Path | What to put there |
-| --- | --- |
-| `career/profile.yaml` | Contact and education |
-| `career/experiences.yaml` | Jobs/internships with facts, metrics, canonical bullets, and source IDs |
-| `career/projects.yaml` | Projects with the same sourced structure |
-| `career/skills.yaml` | Allowed skill inventory plus recommended groups |
-| `resume_templates/*.yaml` | Track layouts (`swe`, `ai`, `default`) |
-| `resume_templates/default.tex.j2` | Resume LaTeX layout |
-| `cover_letter_templates/default.tex.j2` | Cover letter layout |
-| `cover_letter_examples/*.md` | Past cover letters — structure, length, and tone only |
-| `connections/connections.yaml` | People who could refer you, keyed by company |
-
-The career YAML is the source of truth. Every generated content bullet must cite fact/metric IDs from the selected records. Canonical bullets should not invent percentages or technologies that are not in those sources.
-
-`resume_additions/` is leftover notes and is not loaded by the generator.
 
 ## Job files
 
@@ -79,20 +95,18 @@ notes: ""
 
 A copy lives at `jobs/samples/stripe-backend.yaml`.
 
-Optional: `template: auto` (default) scores the job description with token/phrase matching and picks `swe`, `ai`, or `default`. Set `template: swe`, `template: ai`, or `template: default` to force a track. Layout always uses `default.tex.j2` unless a matching `.tex.j2` exists.
+Optional: `template: auto` (default) scores the job description with token/phrase matching and picks `swe`, `ai`, or `default`. Set `template: swe`, `template: ai`, or `template: default` to force a track.
 
 Set `cover_letter: false` to skip cover-letter generation, review, and PDF.
 
-Graduation date is either **June 2027** or **Dec. 2027**, chosen from when the role starts (on/before June 2027 → June; after June 2027 → Dec.). Optional fields:
+Graduation date is either **June 2027** or **Dec. 2027**, chosen from when the role starts. Optional fields:
 
 ```yaml
-starts: Summer 2027          # or Fall 2027, 2027-09, June 2027, …
-graduation: Dec. 2027        # force a date; overrides starts / inference
+starts: Summer 2027
+graduation: Dec. 2027
 ```
 
-If neither is set, the pipeline scans `notes`, `title`, and `description` for season/month hints (e.g. “Summer 2027 internship”). When nothing is found it defaults to June 2027.
-
-Optional screening / portal questions — when present, the writer drafts answers and the checker reviews them after the resume and cover letter. Answers are grounded in selected career records and written to `materials/answers.md`:
+Optional screening / portal questions — answers are grounded in selected career records, written to `materials/answers.md`, and checkpointed so a later Notion/PDF failure does not regenerate them:
 
 ```yaml
 questions:
@@ -100,8 +114,6 @@ questions:
     max_length: 2000
   - prompt: What is your favorite project and why?
     max_length: 200
-  - prompt: Tell us about a time you debugged a hard production issue.
-    # omit max_length (or use null / unlimited) for no character cap
 ```
 
 ## Run
@@ -127,23 +139,44 @@ output/2026-08-25_Stripe-Backend-Engineer/
   materials/resume.pdf
   materials/cover_letter.tex
   materials/cover_letter.pdf
-  materials/answers.md   # only when job YAML has questions:
-  meta/application_plan.json
+  materials/answers.md
+  meta/application_plan.json   # ids, scores, priorities, match explanations
   meta/resume_draft.json
-  meta/resume_final.json
+  meta/resume_final.json       # content actually used for the PDF
+  meta/cover_letter_final.json
+  meta/fit_report.json         # what trimming/shortening changed
   meta/review.json
-  meta/meta.yaml         # includes pipeline metrics
+  meta/answers.json
+  meta/meta.yaml               # pipeline metrics, cost, manual-review flag
 ```
 
-The OS file manager opens on the PDF. A notification includes the company, role, portal URL, and referral (or “No referral match”). Duplicate postings (same portal URL, or same company + title + description hash) are skipped. Successful drops in `jobs/` are moved to `jobs/processed/`. Failures leave the YAML in place and write `*.error.txt` next to it; a `.progress.json` sidecar lets the next run resume.
+Shared telemetry (gitignored under `output/`):
 
-Resumes and cover letters are enforced to one page each. Ranking selects 3–4 experiences and 2–3 projects by relevance (not a fixed top-N of irrelevant items). Resume bullets must fit on a single line (≤113 characters; prefer 90–113 when facts allow). If a PDF still exceeds one page after automatic trim/shorten passes, the run fails.
+- `output/ranking_log.jsonl` — score of every experience/project, selected or not. After 20–50 applications, inspect whether weak items are being selected and tune thresholds from real results.
+- `output/usage.jsonl` — per-call provider, model, input/cached/output/reasoning tokens, latency, estimated cost. Aggregated into cost per application, daily cost, weekly cost, and average cost/application in `meta.yaml`.
 
-You can edit the `.tex` files and recompile:
+Do not add more architecture until you have measured those numbers on a real sample.
+
+Duplicate postings (same portal URL with tracking parameters stripped, or same company + title + whitespace-normalized description) are skipped. A later posting at the same company/title with a substantially different description can reuse the previous `ApplicationPlan` rankings and skill selection, then still do job-specific writing.
+
+Failures leave the YAML in place and write `*.error.txt` with a **failure category**:
+
+`generation_failure` · `invalid_provenance` · `semantic_rejection` · `pdf_overflow` · `latex_compile_failure` · `provider_failure` · `upload_failure`
+
+Retry budgets: semantic rewrite 1, bullet repair 2, PDF-fit LLM repair 1–2, cover-letter repair 1, screening-answer repair 1. After that the application is marked for manual review instead of looping.
+
+Provider 429/5xx errors retry with backoff inside `llm.py`. A provider timeout does not restart earlier pipeline stages.
+
+## Tests
 
 ```bash
-cd output/2026-08-25_Stripe-Backend-Engineer/materials
-latexmk -xelatex resume.tex
+python -m unittest discover -s tests -q
+```
+
+Suites are split by layer: `test_career`, `test_ranking`, `test_plan`, `test_validation`, `test_provenance`, `test_repair`, `test_fit`, `test_llm`, `test_pipeline`. Integration tests mock model responses. An optional live smoke test checks structured outputs, token reporting, and cost calculation:
+
+```bash
+JOBAPPS_SMOKE=1 python -m unittest tests.test_smoke
 ```
 
 ## Parallel processing with Docker
@@ -153,29 +186,8 @@ Run 2–3 workers on one machine so jobs do not wait on each other. Uses Docker 
 **Do not** run `python -m jobapps watch` on the host at the same time — both would fight over `jobs/`.
 
 ```bash
-# Build once
 docker compose build
-
-# Start three workers
 docker compose up --scale worker=3
-
-# In another terminal, drop job YAMLs into jobs/
-cp jobs/samples/stripe-backend.yaml jobs/acme-backend.yaml
-# edit company/title/description, then save more files as needed
-
-# Logs show which worker claimed each file
-docker compose logs -f
-
-# Stop
-docker compose down
 ```
 
-Each worker polls `jobs/`, claims a file with `flock`, runs the same pipeline as `process`, and writes to `output/`. Secrets come from `.env` (`CURSOR_API_KEY`, Notion vars). Cover letters use Times New Roman when available, otherwise TeX Gyre Termes inside the Linux image.
-
-If Cursor rate-limits concurrent runs, start with `--scale worker=2` instead of `3`.
-
-You can also run a single worker without Compose:
-
-```bash
-python -m jobapps worker
-```
+Each worker polls `jobs/`, claims a file with `flock`, runs the same pipeline as `process`, and writes to `output/`. If the API rate-limits concurrent runs, start with `--scale worker=2`.

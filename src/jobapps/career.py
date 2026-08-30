@@ -6,15 +6,33 @@ from functools import lru_cache
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 from jobapps.config import CAREER_DIR
-from jobapps.models import Contact, Education, SkillGroup, allowed_skill_names, parse_skills_bank
+from jobapps.models import (
+    Contact,
+    Education,
+    SkillGroup,
+    allowed_skill_names,
+    numeric_claim_tokens,
+    parse_skills_bank,
+)
 
 
 class SourcedText(BaseModel):
     id: str
     text: str
+    kind: str = ""
+
+    @field_validator("kind", mode="before")
+    @classmethod
+    def normalize_kind(cls, value: object) -> str:
+        key = str(value or "").strip().casefold()
+        if key and key not in {"absolute", "relative", "count"}:
+            raise ValueError(
+                f"kind must be absolute, relative, count, or empty; got {value!r}"
+            )
+        return key
 
 
 class CanonicalBullet(BaseModel):
@@ -193,15 +211,38 @@ def _validate_canonical_sources(bank: CareerBank) -> None:
     errors: list[str] = []
     for record in [*bank.experiences, *bank.projects]:
         known = record.fact_metric_ids()
+        for metric in record.metrics:
+            if not metric.kind:
+                errors.append(f"{metric.id} is missing kind (absolute, relative, or count)")
         for bullet in record.bullets:
             if bullet.text.strip().lower().startswith("stack:"):
                 continue
             if not bullet.sources:
                 errors.append(f"{bullet.id} has no sources")
                 continue
-            for source_id in bullet.sources:
-                if source_id not in known:
-                    errors.append(f"{bullet.id} cites unknown source {source_id}")
+            unknown = [source_id for source_id in bullet.sources if source_id not in known]
+            if unknown:
+                errors.extend(
+                    f"{bullet.id} cites unknown source {source_id}" for source_id in unknown
+                )
+                continue
+            claims = numeric_claim_tokens(bullet.text)
+            if not claims:
+                continue
+            cited_metrics = [item for item in record.metrics if item.id in set(bullet.sources)]
+            if not cited_metrics:
+                errors.append(f"{bullet.id} has numeric claims but cites no metric sources")
+                continue
+            metric_nums: set[str] = set()
+            for item in cited_metrics:
+                metric_nums.update(numeric_claim_tokens(item.text))
+            missing = [claim for claim in claims if claim not in metric_nums]
+            if missing:
+                errors.append(
+                    f"{bullet.id} numeric claims "
+                    + ", ".join(missing)
+                    + " are not supported by cited metrics"
+                )
     if errors:
         raise ValueError("Career bank source errors: " + "; ".join(errors[:12]))
 

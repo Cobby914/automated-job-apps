@@ -33,17 +33,20 @@
       text: Built dashboards that gave managers centralized visibility into employee loan activity rather than requiring information to be gathered manually from separate sources.
   metrics:
     - id: mk-lending.metric.1
+      kind: absolute
       text: Reduced manual loan calculations by approximately 4 hours per day.
     - id: mk-lending.metric.2
-      text: Automated rate-sheet processing, saving approximately 3 hours.
+      kind: absolute
+      text: Saved approximately 3 hours of manual work per rate-sheet processing run.
     - id: mk-lending.metric.3
+      kind: count
       text: Dashboard supported 5+ managers.
   bullets:
     - id: mk-lending.bullet.1
       text: Built a loan-lookup REST API using TypeScript and Node.js, reducing manual calculations by 4 hours per day.
       sources: [mk-lending.fact.2, mk-lending.metric.1]
     - id: mk-lending.bullet.2
-      text: Made a Python/pandas rate-sheet pipeline with PostgreSQL, saving approximately 3 hours of processing time.
+      text: Made a Python/pandas rate-sheet pipeline with PostgreSQL, saving approximately 3 hours per processing run.
       sources: [mk-lending.fact.3, mk-lending.metric.2]
     - id: mk-lending.bullet.3
       text: Created a dashboard tracking employee loans using React, PostgreSQL, and TypeScript for 5+ managers.
@@ -98,11 +101,12 @@
       text: Migrated backend/database infrastructure from Render and NeonDB to AWS, reconciling services and validating authentication, API, and database workflows after deployment.
   metrics:
     - id: tena.metric.1
-      text: Product/site visits increased approximately 30%.
+      kind: relative
+      text: Public site visits increased by approximately 30% relative to pre-launch traffic.
   bullets:
     - id: tena.bullet.1
       text: Shipped a site and admin portal with React, Vite, Chakra UI, TanStack Query, and Zustand as visits rose ~30%.
-      sources: [tena.fact.2, tena.metric.1]
+      sources: [tena.fact.1, tena.fact.2, tena.metric.1]
     - id: tena.bullet.2
       text: Orchestrating Agile sprint cycles and task delegation, maintaining high development velocity and ensuring delivery.
       sources: [tena.fact.5]
@@ -148,7 +152,8 @@
       text: Integrated the Firebase Emulator Suite into the development workflow so features could be developed and tested locally with less dependence on production Firebase services.
   metrics:
     - id: fipet.metric.1
-      text: Reduced relevant backend/query latency by approximately 10%.
+      kind: relative
+      text: Reduced friend-request/backend query latency by approximately 10% relative to the pre-optimization path.
   bullets:
     - id: fipet.bullet.1
       text: Architected a graph-based social schema to optimize multi-level connection and relationship queries.
@@ -171,6 +176,7 @@
   domains: [autonomous-driving, computer-vision, robotics]
   technologies:
     - CARLA
+    - SUMO
     - Python
     - PyTorch
     - Linux/Unix
@@ -184,7 +190,7 @@
     - Multimodal Learning
   summary: >
     Conducting research on multimodal autonomous-driving perception using CARLA,
-    radar, cameras, Python, PyTorch, and Linux. Built an end-to-end simulation and
+    SUMO, radar, cameras, Python, PyTorch, and Linux. Built an end-to-end simulation and
     dataset-generation framework for evaluating infrastructure-mounted radar-camera
     configurations, including configurable 4/8/12/14-radar layouts, synchronized
     radar-camera captures, offline labeling/QA, and evaluation of PointNet and
@@ -192,7 +198,7 @@
     Undergraduate Research.
   facts:
     - id: uci-scalesense.fact.1
-      text: Conducting research on multimodal autonomous-driving perception using CARLA, radar, cameras, Python, PyTorch, and Linux.
+      text: Conducting research on multimodal autonomous-driving perception using CARLA, SUMO, radar, cameras, Python, PyTorch, and Linux.
     - id: uci-scalesense.fact.2
       text: Built an end-to-end simulation and dataset-generation framework for evaluating infrastructure-mounted radar-camera configurations under controlled traffic scenarios.
     - id: uci-scalesense.fact.3
@@ -205,13 +211,17 @@
       text: Research received UCI's Chancellor's Award for Excellence in Undergraduate Research.
   metrics:
     - id: uci-scalesense.metric.1
+      kind: count
       text: Generated/analyzed approximately 1.85 million radar returns.
     - id: uci-scalesense.metric.2
+      kind: count
       text: Supported configurable 4 / 8 / 12 / 14-radar layouts.
     - id: uci-scalesense.metric.3
-      text: QA/offline processing reached roughly 3,000 radar returns/sec.
-    - id: uci-scalesense.metric.5
-      text: OBB-based radar labeling reached approximately 87% precision.
+      kind: absolute
+      text: QA/offline processing reached roughly 3000 radar returns/sec.
+    - id: uci-scalesense.metric.4
+      kind: absolute
+      text: OBB-based radar labeling reached approximately 87% precision (absolute precision, not an 87% relative gain).
   bullets:
     - id: uci-scalesense.bullet.1
       text: Researching a multi-modal perception system fusing camera and radar data in CARLA simulations.
@@ -224,10 +234,10 @@
       sources: [uci-scalesense.fact.2, uci-scalesense.fact.3]
     - id: uci-scalesense.bullet.4
       text: Generated labeled radar-camera captures across 4/8/12/14-radar layouts with ~1.85M returns.
-      sources: [uci-scalesense.metric.1, uci-scalesense.metric.2]
+      sources: [uci-scalesense.fact.2, uci-scalesense.fact.3, uci-scalesense.metric.1, uci-scalesense.metric.2]
     - id: uci-scalesense.bullet.5
       text: Implemented OBB-based radar labeling with 87% precision, exporting labels and sensor extrinsics for training.
-      sources: [uci-scalesense.fact.4, uci-scalesense.metric.5]
+      sources: [uci-scalesense.fact.4, uci-scalesense.metric.4]
 
 - id: commit-the-change
   company: Commit the Change
@@ -266,14 +276,19 @@
       text: Built a provider directory and quota platform used by clinic staff rather than manually managed processes.
   metrics:
     - id: commit-the-change.metric.1
-      text: Reduced administrative/onboarding workflow time by approximately 40%.
+      kind: relative
+      text: Reduced administrative/onboarding workflow time by approximately 40% relative to the prior manual process.
     - id: commit-the-change.metric.2
-      text: Improved data retrieval performance approximately 25%.
+      kind: relative
+      text: Improved location-management data retrieval speed by approximately 25% relative to the previous query path.
     - id: commit-the-change.metric.3
+      kind: absolute
       text: One dashboard optimization reduced loading from approximately 40 seconds to 30 seconds.
     - id: commit-the-change.metric.4
+      kind: count
       text: Platform was built for an organization serving 100+ local patients.
     - id: commit-the-change.metric.5
+      kind: count
       text: Provider directory and quota platform used daily by 14 CLCHC staff members.
   bullets:
     - id: commit-the-change.bullet.1
@@ -293,4 +308,4 @@
       sources: [commit-the-change.fact.2]
     - id: commit-the-change.bullet.6
       text: Optimized case manager table loading latency using React, reducing load time from ~40s to ~30s.
-      sources: [commit-the-change.metric.3]
+      sources: [commit-the-change.fact.1, commit-the-change.metric.3]

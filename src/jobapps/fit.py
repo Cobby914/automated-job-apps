@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from jobapps.models import (
     ApplicationPlan,
     CoverLetter,
+    FitChange,
     TailoredResume,
     is_stack_bullet,
 )
@@ -104,16 +105,10 @@ def drop_last_content_bullet(bullets: list[str]) -> list[str] | None:
     return [bullet for index, bullet in enumerate(bullets) if index != drop_at]
 
 
-def apply_python_trim(resume: TailoredResume, plan: ApplicationPlan) -> TailoredResume | None:
-    """Apply one deterministic trim step. Lowest-priority content first.
-
-    Order:
-    1. Reduce project content bullets toward the layout target
-    2. Reduce experience content bullets toward the layout minimum
-    3. Remove the lowest-priority extra bullet
-    4. Remove the lowest-priority project
-    5. Remove the lowest-priority experience
-    """
+def apply_python_trim_step(
+    resume: TailoredResume, plan: ApplicationPlan
+) -> tuple[TailoredResume, FitChange] | None:
+    """Apply one deterministic trim step. Lowest-priority content first."""
     layout = plan.layout
 
     over_projects = [
@@ -125,9 +120,18 @@ def apply_python_trim(resume: TailoredResume, plan: ApplicationPlan) -> Tailored
         index = max(over_projects, key=lambda i: _priority_index(plan, _project_key(resume, i, plan)))
         trimmed = drop_last_content_bullet(resume.projects[index].bullets)
         if trimmed is not None:
+            item_id = _project_key(resume, index, plan)
+            bullet_index = _content_indices(resume.projects[index].bullets)[-1]
             projects = list(resume.projects)
             projects[index] = projects[index].model_copy(update={"bullets": trimmed})
-            return resume.model_copy(update={"projects": projects})
+            return resume.model_copy(update={"projects": projects}), FitChange(
+                action="removed_project_bullet",
+                section="project",
+                item_id=item_id,
+                item_index=index,
+                bullet_index=bullet_index,
+                detail=f"removed project bullet {bullet_index} from {item_id}",
+            )
 
     over_experiences = [
         index
@@ -141,11 +145,19 @@ def apply_python_trim(resume: TailoredResume, plan: ApplicationPlan) -> Tailored
         )
         trimmed = drop_last_content_bullet(resume.experience[index].bullets)
         if trimmed is not None:
+            item_id = _experience_key(resume, index, plan)
+            bullet_index = _content_indices(resume.experience[index].bullets)[-1]
             experiences = list(resume.experience)
             experiences[index] = experiences[index].model_copy(update={"bullets": trimmed})
-            return resume.model_copy(update={"experience": experiences})
+            return resume.model_copy(update={"experience": experiences}), FitChange(
+                action="removed_experience_bullet",
+                section="experience",
+                item_id=item_id,
+                item_index=index,
+                bullet_index=bullet_index,
+                detail=f"removed experience bullet {bullet_index} from {item_id}",
+            )
 
-    # Drop the lowest-priority remaining extra content bullet across the resume.
     candidates: list[tuple[int, str, int]] = []
     for index, item in enumerate(resume.experience):
         if len(_content_indices(item.bullets)) > 1:
@@ -162,33 +174,68 @@ def apply_python_trim(resume: TailoredResume, plan: ApplicationPlan) -> Tailored
         if kind == "experience":
             trimmed = drop_last_content_bullet(resume.experience[index].bullets)
             if trimmed is not None:
+                item_id = _experience_key(resume, index, plan)
                 experiences = list(resume.experience)
                 experiences[index] = experiences[index].model_copy(update={"bullets": trimmed})
-                return resume.model_copy(update={"experience": experiences})
+                return resume.model_copy(update={"experience": experiences}), FitChange(
+                    action="removed_experience_bullet",
+                    section="experience",
+                    item_id=item_id,
+                    item_index=index,
+                    detail=f"removed extra experience bullet from {item_id}",
+                )
         else:
             trimmed = drop_last_content_bullet(resume.projects[index].bullets)
             if trimmed is not None:
+                item_id = _project_key(resume, index, plan)
                 projects = list(resume.projects)
                 projects[index] = projects[index].model_copy(update={"bullets": trimmed})
-                return resume.model_copy(update={"projects": projects})
+                return resume.model_copy(update={"projects": projects}), FitChange(
+                    action="removed_project_bullet",
+                    section="project",
+                    item_id=item_id,
+                    item_index=index,
+                    detail=f"removed extra project bullet from {item_id}",
+                )
 
     if len(resume.projects) > layout.min_projects:
         index = max(
             range(len(resume.projects)),
             key=lambda i: _priority_index(plan, _project_key(resume, i, plan)),
         )
+        item_id = _project_key(resume, index, plan)
         projects = [item for i, item in enumerate(resume.projects) if i != index]
-        return resume.model_copy(update={"projects": projects})
+        return resume.model_copy(update={"projects": projects}), FitChange(
+            action="removed_project",
+            section="project",
+            item_id=item_id,
+            item_index=index,
+            detail=f"removed lowest-ranked project {item_id}",
+        )
 
     if len(resume.experience) > layout.min_experiences:
         index = max(
             range(len(resume.experience)),
             key=lambda i: _priority_index(plan, _experience_key(resume, i, plan)),
         )
+        item_id = _experience_key(resume, index, plan)
         experiences = [item for i, item in enumerate(resume.experience) if i != index]
-        return resume.model_copy(update={"experience": experiences})
+        return resume.model_copy(update={"experience": experiences}), FitChange(
+            action="removed_experience",
+            section="experience",
+            item_id=item_id,
+            item_index=index,
+            detail=f"removed lowest-ranked experience {item_id}",
+        )
 
     return None
+
+
+def apply_python_trim(resume: TailoredResume, plan: ApplicationPlan) -> TailoredResume | None:
+    result = apply_python_trim_step(resume, plan)
+    if result is None:
+        return None
+    return result[0]
 
 
 def longest_cover_paragraph_index(cover: CoverLetter) -> int | None:

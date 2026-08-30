@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import json
 import re
 from dataclasses import dataclass
+from datetime import datetime
 
 from jobapps.career import CareerBank, ExperienceRecord, ProjectRecord, SkillsInventory
+from jobapps.config import RANKING_LOG_PATH
 from jobapps.models import (
     AUTO_TEMPLATE_ALIASES,
     RESUME_TEMPLATE_NAMES,
@@ -172,6 +175,8 @@ class RankedItem:
     record_id: str
     score: float
     kind: str  # "experience" or "project"
+    explanation: str = ""
+    matched_terms: tuple[str, ...] = ()
 
 
 def _record_corpus(record: ExperienceRecord | ProjectRecord) -> str:
@@ -202,34 +207,58 @@ def _tech_hit(tech: str, job_tokens: set[str], blob: str) -> bool:
     return name.casefold() in blob or tech_tokens <= job_tokens
 
 
-def score_record(job: Job, record: ExperienceRecord | ProjectRecord, template: str) -> float:
+def score_record_detailed(
+    job: Job, record: ExperienceRecord | ProjectRecord, template: str
+) -> RankedItem:
     hay = _record_corpus(record).casefold()
     blob = job_text(job).casefold()
     job_tokens = tokenize(blob)
     record_tokens = tokenize(hay)
     overlap = len(job_tokens & record_tokens)
-    tech_hits = sum(2 for tech in record.technologies if _tech_hit(tech, job_tokens, blob))
-    tag_hits = sum(1 for tag in record.tags if tag.casefold().replace("-", " ") in blob)
-    domain_hits = sum(1 for domain in record.domains if domain.casefold().replace("-", " ") in blob)
+    matched: list[str] = []
+    tech_hits = 0
+    for tech in record.technologies:
+        if _tech_hit(tech, job_tokens, blob):
+            tech_hits += 2
+            matched.append(tech)
+    tag_hits = 0
+    for tag in record.tags:
+        if tag.casefold().replace("-", " ") in blob:
+            tag_hits += 1
+            matched.append(tag)
+    domain_hits = 0
+    for domain in record.domains:
+        if domain.casefold().replace("-", " ") in blob:
+            domain_hits += 1
+            matched.append(domain)
     track_bonus = 3.0 if template in {track.casefold() for track in record.tracks} else 0.0
-    # Untagged extras (unity-rl, unix-shell, emg) can still win on overlap.
-    return float(overlap + tech_hits + tag_hits + domain_hits + track_bonus)
+    score = float(overlap + tech_hits + tag_hits + domain_hits + track_bonus)
+    kind = "experience" if isinstance(record, ExperienceRecord) else "project"
+    if matched:
+        explanation = f"{record.id}: matched {', '.join(matched)}"
+    else:
+        explanation = f"{record.id}: token overlap {overlap}"
+    return RankedItem(
+        record_id=record.id,
+        score=score,
+        kind=kind,
+        explanation=explanation,
+        matched_terms=tuple(matched),
+    )
+
+
+def score_record(job: Job, record: ExperienceRecord | ProjectRecord, template: str) -> float:
+    return score_record_detailed(job, record, template).score
 
 
 def rank_experiences(job: Job, bank: CareerBank, template: str) -> list[RankedItem]:
-    ranked = [
-        RankedItem(record.id, score_record(job, record, template), "experience")
-        for record in bank.experiences
-    ]
+    ranked = [score_record_detailed(job, record, template) for record in bank.experiences]
     ranked.sort(key=lambda item: (-item.score, item.record_id))
     return ranked
 
 
 def rank_projects(job: Job, bank: CareerBank, template: str) -> list[RankedItem]:
-    ranked = [
-        RankedItem(record.id, score_record(job, record, template), "project")
-        for record in bank.projects
-    ]
+    ranked = [score_record_detailed(job, record, template) for record in bank.projects]
     ranked.sort(key=lambda item: (-item.score, item.record_id))
     return ranked
 
@@ -327,3 +356,58 @@ def select_skills(job: Job, skills: SkillsInventory, template: str) -> list[Skil
             if len(groups) >= 3:
                 break
     return groups[:5]
+
+
+def append_ranking_log(
+    job: Job,
+    experiences: list[RankedItem],
+    projects: list[RankedItem],
+    selected_experience_ids: list[str],
+    selected_project_ids: list[str],
+    *,
+    reused: bool = False,
+) -> None:
+    """Append every ranked item so thresholds can be tuned after 20–50 applications."""
+    RANKING_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    stamp = datetime.now().isoformat(timespec="seconds")
+    selected_exp = set(selected_experience_ids)
+    selected_proj = set(selected_project_ids)
+    with RANKING_LOG_PATH.open("a", encoding="utf-8") as handle:
+        for item in experiences:
+            handle.write(
+                json.dumps(
+                    {
+                        "recorded_at": stamp,
+                        "company": job.company,
+                        "title": job.title,
+                        "kind": "experience",
+                        "record_id": item.record_id,
+                        "score": item.score,
+                        "selected": item.record_id in selected_exp,
+                        "explanation": item.explanation,
+                        "matched_terms": list(item.matched_terms),
+                        "reused": reused,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )
+        for item in projects:
+            handle.write(
+                json.dumps(
+                    {
+                        "recorded_at": stamp,
+                        "company": job.company,
+                        "title": job.title,
+                        "kind": "project",
+                        "record_id": item.record_id,
+                        "score": item.score,
+                        "selected": item.record_id in selected_proj,
+                        "explanation": item.explanation,
+                        "matched_terms": list(item.matched_terms),
+                        "reused": reused,
+                    },
+                    ensure_ascii=False,
+                )
+                + "\n"
+            )

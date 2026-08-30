@@ -1,4 +1,4 @@
-"""Cursor-powered resume, cover letter, and screening-answer generation."""
+"""Resume, cover letter, and screening-answer generation. Provider-agnostic."""
 
 from __future__ import annotations
 
@@ -13,12 +13,7 @@ from jobapps.config import (
     escalation_model,
     writer_model,
 )
-from jobapps.llm import (
-    extract_json,
-    generate_structured,
-    generate_text,
-    review as llm_review,
-)
+from jobapps.llm import generate_structured, review as llm_review
 from jobapps.models import (
     ApplicationAnswer,
     ApplicationAnswersResult,
@@ -33,11 +28,12 @@ from jobapps.models import (
 from jobapps.plan import selected_experiences, selected_projects
 
 RESUME_WRITER_PROMPT = """\
-You tailor a resume for one job from an ApplicationPlan and selected career records.
+You tailor a resume for one job from an ApplicationPlan and the career bank.
 
 Rules:
 - Never invent employers, job titles, dates, degrees, schools, projects, or skills.
-- Use only the selected experiences and projects provided. Do not add others.
+- Use only experiences and projects whose ids appear in ApplicationPlan. \
+Do not add others.
 - Copy the provided skill_groups as-is. Do not add, invent, or rename skill items.
 - Leave resume.summary empty.
 - Keep education exactly as provided (including the graduation year).
@@ -47,10 +43,13 @@ Rules:
 - Each content bullet must be one printed line of {min_chars}-{max_chars} characters. \
 Prefer filling the line when facts allow; never exceed {max_chars}.
 - Start from the canonical bullets and expand with grounded tech and impact from \
-facts/metrics. Attach source ids on every bullet.
+facts/metrics. Attach at least one valid fact/metric source id on every content bullet.
+- Cite sources that belong to that experience or project only. Unknown ids are invalid.
+- Numeric claims must match a cited metric. Relative vs absolute improvements are \
+labeled on each metric (kind: relative, absolute, or count). Do not convert one into \
+the other.
 - Write Jake Gutierrez-style lines: what + how (tech) + impact.
 - Do not mention that you are an AI.
-- Return JSON only matching the schema. No markdown, no code fences, no commentary.
 - Do not edit files, run commands, or use tools.
 """
 
@@ -69,7 +68,6 @@ technical experience or project; optional research/project depth; company-specif
 - Match the example's length and tone, not its company-specific content.
 - Use the exact education year from the resume. Do not change June 2027 vs Dec. 2027.
 - Do not mention that you are an AI.
-- Return JSON only matching the schema. No markdown, no code fences, no commentary.
 - Do not edit files, run commands, or use tools.
 """
 
@@ -84,10 +82,11 @@ Approve only if all of these are true:
 - Every claim is grounded in the selected career records or the finalized resume.
 - Experiences and projects are relevant to the job.
 - Resume bullets read like a strong human resume (specific tech + impact).
+- Relative vs absolute metrics are not restated as the other kind.
 - If a cover letter is present: first person, specific, not a resume restatement, \
 not generic, 4-6 paragraphs of real substance.
 
-Return JSON only matching the schema. issues must be objects with:
+Every issue must be an object with:
 - type: ungrounded | invention | generic | irrelevant | voice | unsupported_claim | other
 - section: experience | project | cover_letter | resume | answers
 - item_id: career record id such as uci-scalesense (empty for cover_letter/resume)
@@ -98,9 +97,7 @@ or resume (fallback if item_id is unknown)
 - code: same as type
 - message: one specific sentence
 - severity: error or warning
-Do not use a bare list of strings for issues.
 Identify experiences and projects by career record id, not only array index.
-No markdown, no code fences, no commentary.
 Do not edit files, run commands, or use tools.
 """
 
@@ -120,7 +117,6 @@ max_length is null/omitted, there is no limit.
 grounded experiences and projects, not fluff.
 - Answer every question in the same order. Copy each prompt and max_length into the output.
 - Do not mention that you are an AI.
-- Return JSON only matching the schema. No markdown, no code fences, no commentary.
 - Do not edit files, run commands, or use tools.
 """
 
@@ -137,7 +133,7 @@ Approve only if all of these are true:
 uses that count when enough grounded material exists.
 - Tone is first-person, specific, and appropriate for a real application.
 
-Return JSON only matching the schema. issues must be objects with:
+Every issue must be an object with:
 - type: ungrounded | invention | generic | irrelevant | voice | unsupported_claim | other
 - section: answers
 - item_id: empty
@@ -146,19 +142,12 @@ Return JSON only matching the schema. issues must be objects with:
 - code: same as type
 - message: one specific sentence
 - severity: error or warning
-Do not use a bare list of strings for issues.
-No markdown, no code fences, no commentary.
 Do not edit files, run commands, or use tools.
 """
 
 
 def _dump(data: object) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False)
-
-
-def run_prompt(prompt: str, model: str) -> str:
-    """Backward-compatible single-blob call. Prefer generate_text() for cacheable prompts."""
-    return generate_text(system="", user=prompt, model=model, cache_system=False)
 
 
 def load_cover_letter_example(path: Path | None = None) -> str:
@@ -182,14 +171,15 @@ Starts: {job.starts or "(infer from description)"}
 """
 
 
-def _records_payload(
-    experiences: list[ExperienceRecord],
-    projects: list[ProjectRecord],
-) -> dict[str, object]:
-    return {
-        "experiences": [item.prompt_payload() for item in experiences],
-        "projects": [item.prompt_payload() for item in projects],
-    }
+def career_prompt_block(bank: CareerBank) -> str:
+    """Stable career payload for prompt-prefix caching."""
+    return _dump(
+        {
+            "experiences": [item.prompt_payload() for item in bank.experiences],
+            "projects": [item.prompt_payload() for item in bank.projects],
+            "education": [item.model_dump() for item in bank.profile.education],
+        }
+    )
 
 
 def generate_resume_draft(
@@ -198,8 +188,6 @@ def generate_resume_draft(
     bank: CareerBank,
 ) -> tuple[DraftResume, int]:
     """Write a tailored resume from the plan. Returns (draft, context_chars)."""
-    experiences = selected_experiences(plan, bank)
-    projects = selected_projects(plan, bank)
     layout = plan.layout
     system = f"""\
 {RESUME_WRITER_PROMPT.format(
@@ -210,8 +198,8 @@ def generate_resume_draft(
     max_chars=layout.max_bullet_chars,
 )}
 
-JSON schema:
-{_dump(DraftResume.model_json_schema())}
+## Career bank (source of truth; use only ids listed in the ApplicationPlan)
+{career_prompt_block(bank)}
 """
     user = f"""\
 {_job_header(job)}
@@ -219,17 +207,15 @@ JSON schema:
 ## ApplicationPlan
 {_dump(plan.model_dump())}
 
-## Selected career records (only these may appear)
-{_dump(_records_payload(experiences, projects))}
-
-## Education (copy exactly, including year)
-{_dump([item.model_dump() for item in bank.profile.education])}
-
 ## Approved skills (copy as-is; do not invent names)
 {_dump([group.model_dump() for group in plan.skill_groups])}
 """
     draft = generate_structured(
-        system=system, user=user, model=writer_model(), schema=DraftResume
+        system=system,
+        user=user,
+        model=writer_model(),
+        schema=DraftResume,
+        purpose="resume_write",
     )
     if not draft.skills:
         draft = draft.model_copy(update={"skills": list(plan.skill_groups)})
@@ -249,7 +235,6 @@ def generate_cover_letter_draft(
         item for item in selected_experiences(plan, bank) if item.id in source_ids
     ]
     projects = [item for item in selected_projects(plan, bank) if item.id in source_ids]
-    # Preserve plan order for supporting records.
     ordered: list[ExperienceRecord | ProjectRecord] = []
     lookup = {item.id: item for item in [*experiences, *projects]}
     for record_id in source_ids:
@@ -260,23 +245,24 @@ def generate_cover_letter_draft(
     system = f"""\
 {COVER_LETTER_WRITER_PROMPT}
 
-JSON schema:
-{_dump(CoverLetter.model_json_schema())}
-
 ## Cover letter example (structure, length, and tone only)
 {example or "(none — use a professional first-person cover letter format)"}
+
+## Career bank excerpts available as supporting records
+{_dump(supporting)}
 """
     user = f"""\
 {_job_header(job)}
 
 ## Finalized resume
 {_dump(resume.model_dump())}
-
-## Supporting experiences/projects
-{_dump(supporting)}
 """
     return generate_structured(
-        system=system, user=user, model=writer_model(), schema=CoverLetter
+        system=system,
+        user=user,
+        model=writer_model(),
+        schema=CoverLetter,
+        purpose="cover_letter_write",
     )
 
 
@@ -287,23 +273,18 @@ def _review_messages(
     resume: TailoredResume,
     cover: CoverLetter | None,
 ) -> tuple[str, str]:
-    experiences = selected_experiences(plan, bank)
-    projects = selected_projects(plan, bank)
     cover_block = _dump(cover.model_dump()) if cover is not None else "(cover letter skipped)"
     system = f"""\
 {CHECKER_PROMPT}
 
-JSON schema:
-{_dump(ReviewResult.model_json_schema())}
+## Career bank (source of truth)
+{career_prompt_block(bank)}
 """
     user = f"""\
 {_job_header(job)}
 
 ## ApplicationPlan
 {_dump(plan.model_dump())}
-
-## Selected career records
-{_dump(_records_payload(experiences, projects))}
 
 ## Draft resume
 {_dump(resume.model_dump())}
@@ -321,17 +302,25 @@ def review_materials(
     resume: TailoredResume,
     cover: CoverLetter | None,
 ) -> tuple[ReviewResult, bool, str]:
-    """Sonnet review; escalate to Opus only when Sonnet flags an issue.
+    """Cheap reviewer first; escalate only when something is flagged.
 
     Returns (review, escalated, model_used).
     """
     system, user = _review_messages(job, plan, bank, resume, cover)
     checker = checker_model()
-    review = llm_review(system=system, user=user, model=checker, schema=ReviewResult)
+    review = llm_review(
+        system=system, user=user, model=checker, schema=ReviewResult, purpose="review"
+    )
     if review.approved and not review.issues:
         return review, False, checker
     escalation = escalation_model()
-    review = llm_review(system=system, user=user, model=escalation, schema=ReviewResult)
+    review = llm_review(
+        system=system,
+        user=user,
+        model=escalation,
+        schema=ReviewResult,
+        purpose="review_escalation",
+    )
     return review, True, escalation
 
 
@@ -366,24 +355,24 @@ def _align_answers(job: Job, result: ApplicationAnswersResult) -> ApplicationAns
     return ApplicationAnswersResult(answers=aligned)
 
 
-def _answers_context(
+def _answers_user(
     job: Job,
     plan: ApplicationPlan,
     bank: CareerBank,
+    extra: str = "",
 ) -> str:
-    experiences = selected_experiences(plan, bank)
-    projects = selected_projects(plan, bank)
     questions_payload = [
         {"prompt": q.prompt, "max_length": q.max_length} for q in job.questions
     ]
     return f"""\
 {_job_header(job)}
 
-## Selected career records (summaries, facts, metrics, bullets)
-{_dump(_records_payload(experiences, projects))}
+## ApplicationPlan
+{_dump(plan.model_dump())}
 
 ## Questions to answer (preserve order, prompt, and max_length)
 {_dump(questions_payload)}
+{extra}
 """
 
 
@@ -396,16 +385,16 @@ def _write_answers_draft(
     system = f"""\
 {ANSWERS_WRITER_PROMPT}
 
-JSON schema:
-{_dump(ApplicationAnswersResult.model_json_schema())}
+## Career bank (source of truth; use only ids listed in the ApplicationPlan)
+{career_prompt_block(bank)}
 """
-    user = f"""\
-{_answers_context(job, plan, bank)}
-{extra}
-Return answers as one JSON object matching the schema.
-"""
+    user = _answers_user(job, plan, bank, extra)
     draft = generate_structured(
-        system=system, user=user, model=writer_model(), schema=ApplicationAnswersResult
+        system=system,
+        user=user,
+        model=writer_model(),
+        schema=ApplicationAnswersResult,
+        purpose="answers_write",
     )
     return _align_answers(job, draft)
 
@@ -419,21 +408,32 @@ def _review_answers(
     system = f"""\
 {ANSWERS_CHECKER_PROMPT}
 
-JSON schema:
-{_dump(ReviewResult.model_json_schema())}
+## Career bank (source of truth)
+{career_prompt_block(bank)}
 """
     user = f"""\
-{_answers_context(job, plan, bank)}
+{_job_header(job)}
+
+## ApplicationPlan
+{_dump(plan.model_dump())}
 
 ## Draft answers to review
 {_dump(draft.model_dump())}
 """
     checker = checker_model()
-    review = llm_review(system=system, user=user, model=checker, schema=ReviewResult)
+    review = llm_review(
+        system=system, user=user, model=checker, schema=ReviewResult, purpose="answers_review"
+    )
     if review.approved and not review.issues:
         return review, False, checker
     escalation = escalation_model()
-    review = llm_review(system=system, user=user, model=escalation, schema=ReviewResult)
+    review = llm_review(
+        system=system,
+        user=user,
+        model=escalation,
+        schema=ReviewResult,
+        purpose="answers_review_escalation",
+    )
     return review, True, escalation
 
 
@@ -455,6 +455,8 @@ def generate_answers(
             issue_payload.append(
                 {
                     "location": "answers[0]",
+                    "type": "other",
+                    "section": "answers",
                     "code": "other",
                     "message": review.summary or "The answers did not look strong enough.",
                     "severity": "error",
@@ -464,6 +466,8 @@ def generate_answers(
             issue_payload.append(
                 {
                     "location": "answers",
+                    "type": "other",
+                    "section": "answers",
                     "code": "other",
                     "message": length_issue,
                     "severity": "error",
@@ -474,7 +478,6 @@ def generate_answers(
 {_dump({"summary": review.summary, "issues": issue_payload})}
 
 Respect each question's max_length. Keep every fact grounded in the selected records.
-Return a full replacement JSON object.
 """
         draft = _write_answers_draft(job, plan, bank, extra=extra)
         review, escalated, used_checker = _review_answers(job, plan, bank, draft)

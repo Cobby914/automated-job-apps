@@ -11,10 +11,19 @@ from pathlib import Path
 
 from jobapps.career import CareerBank, get_career_bank
 from jobapps.config import CONNECTIONS_PATH, JOBS_DIR, OUTPUT_DIR, PROCESSED_DIR, writer_model
-from jobapps.dedup import find_duplicate
+from jobapps.dedup import find_duplicate, find_reusable_plan
+from jobapps.errors import (
+    GENERATION_FAILURE,
+    INVALID_PROVENANCE,
+    LATEX_COMPILE_FAILURE,
+    PDF_OVERFLOW,
+    UPLOAD_FAILURE,
+    PipelineError,
+    infer_failure_category,
+)
 from jobapps.fit import (
     OverflowReport,
-    apply_python_trim,
+    apply_python_trim_step,
     longest_content_bullet,
     parse_overfull_hbox,
 )
@@ -32,13 +41,23 @@ from jobapps.graduation import (
 )
 from jobapps.latex import compile_tex_with_log, pdf_page_count, render_documents
 from jobapps.match import match_connection
+from jobapps.llm import (
+    aggregate_costs,
+    append_usage_log,
+    begin_usage_collection,
+    summarize_usage,
+    usage_records,
+)
 from jobapps.models import (
+    ApplicationAnswersResult,
     ApplicationPlan,
     Connection,
     CoverLetter,
     DraftExperience,
     DraftProject,
     DraftResume,
+    FitChange,
+    FitReport,
     Job,
     ParsedLocation,
     PipelineMetrics,
@@ -60,11 +79,14 @@ from jobapps.notify import notify, reveal
 from jobapps.plan import build_application_plan, selected_experiences
 from jobapps.repair import rewrite_bullet, rewrite_cover_letter_paragraph, shorten_bullet, shorten_cover_letter
 from jobapps.validate import (
+    MAX_ANSWER_REPAIRS,
     MAX_BULLET_REPAIRS,
     MAX_COVER_LETTER_REPAIRS,
     MAX_PAGE_FIT_REPAIRS,
+    MAX_PDF_FIT_LLM_REPAIRS,
     MAX_SEMANTIC_REVISIONS,
     apply_mechanical_fixes,
+    validate_answers,
     validate_cover_letter,
     validate_draft_resume,
 )
@@ -128,6 +150,8 @@ _STAGE_ORDER = [
     "cover_drafted",
     "reviewed",
     "fitted",
+    "answers_generated",
+    "answers_validated",
     "complete",
 ]
 
@@ -429,39 +453,53 @@ def _repair_from_review(
     plan: ApplicationPlan,
     bank: CareerBank,
 ) -> tuple[DraftResume, CoverLetter | None, int, int]:
+    bullet_rewrites = 0
+    cover_rewrites = 0
+    repaired = False
+    for issue in review.issues:
+        if issue.severity.casefold() == "warning":
+            continue
+        feedback = issue_feedback(issue)
+        loc = _resolve_review_issue(issue, draft, bank)
+        if loc is not None and loc.kind == "cover_letter" and cover is not None and cover.paragraphs:
+            if cover_rewrites >= MAX_COVER_LETTER_REPAIRS:
+                continue
+            index = loc.part_index if 0 <= loc.part_index < len(cover.paragraphs) else 0
+            rewritten = rewrite_cover_letter_paragraph(
+                cover.paragraphs[index],
+                index + 1,
+                cover,
+                feedback,
+                [item.prompt_payload() for item in selected_experiences(plan, bank)[:2]],
+            )
+            paragraphs = list(cover.paragraphs)
+            paragraphs[index] = rewritten
+            cover = cover.model_copy(update={"paragraphs": paragraphs})
+            cover_rewrites += 1
+            repaired = True
+            continue
+        if loc is not None and loc.kind == "experience" and bullet_rewrites < MAX_BULLET_REPAIRS:
+            draft, rewritten = _repair_experience_bullet(
+                draft, loc.item_index, loc.part_index, feedback, bank
+            )
+            bullet_rewrites += rewritten
+            repaired = repaired or bool(rewritten)
+            continue
+        if loc is not None and loc.kind == "project" and bullet_rewrites < MAX_BULLET_REPAIRS:
+            draft, rewritten = _repair_project_bullet(
+                draft, loc.item_index, loc.part_index, feedback, bank
+            )
+            bullet_rewrites += rewritten
+            repaired = repaired or bool(rewritten)
+            continue
+    if repaired:
+        return draft, cover, bullet_rewrites, cover_rewrites
+
     issue = _first_repairable_issue(review)
     if issue is None:
         return draft, cover, 0, 0
     feedback = issue_feedback(issue)
     loc = _resolve_review_issue(issue, draft, bank)
-    if loc is not None and loc.kind == "cover_letter" and cover is not None and cover.paragraphs:
-        index = loc.part_index if 0 <= loc.part_index < len(cover.paragraphs) else 0
-        rewritten = rewrite_cover_letter_paragraph(
-            cover.paragraphs[index],
-            index + 1,
-            cover,
-            feedback,
-            [item.prompt_payload() for item in selected_experiences(plan, bank)[:2]],
-        )
-        paragraphs = list(cover.paragraphs)
-        paragraphs[index] = rewritten
-        cover = cover.model_copy(update={"paragraphs": paragraphs})
-        return draft, cover, 0, 1
-
-    if loc is not None and loc.kind == "experience":
-        draft, rewritten = _repair_experience_bullet(
-            draft, loc.item_index, loc.part_index, feedback, bank
-        )
-        if rewritten:
-            return draft, cover, rewritten, 0
-
-    if loc is not None and loc.kind == "project":
-        draft, rewritten = _repair_project_bullet(
-            draft, loc.item_index, loc.part_index, feedback, bank
-        )
-        if rewritten:
-            return draft, cover, rewritten, 0
-
     tailored = draft.to_tailored()
     longest = longest_content_bullet(tailored)
     if loc is None or loc.kind in {"resume", "answers"} or longest is not None:
@@ -517,6 +555,13 @@ def _set_resume_bullet(
     return resume.model_copy(update={"projects": projects})
 
 
+def _compile_tex(path: Path) -> tuple[object, str]:
+    try:
+        return compile_tex_with_log(path)
+    except RuntimeError as error:
+        raise PipelineError(LATEX_COMPILE_FAILURE, str(error)) from error
+
+
 def _render_and_fit(
     job: Job,
     contact,
@@ -526,9 +571,11 @@ def _render_and_fit(
     plan: ApplicationPlan,
     bank: CareerBank,
     metrics: PipelineMetrics,
-) -> tuple[TailoredResume, CoverLetter | None]:
+) -> tuple[TailoredResume, CoverLetter | None, FitReport]:
     page_fit = 0
+    llm_fit = 0
     captured_initial = False
+    report_out = FitReport()
     while True:
         render_documents(
             job,
@@ -539,11 +586,11 @@ def _render_and_fit(
             template_name=job.template,
             compile_pdf=False,
         )
-        _pdf, resume_log = compile_tex_with_log(materials_dir / "resume.tex")
+        _pdf, resume_log = _compile_tex(materials_dir / "resume.tex")
         cover_log = ""
         cover_pages: int | None = None
         if cover is not None:
-            _pdf, cover_log = compile_tex_with_log(materials_dir / "cover_letter.tex")
+            _pdf, cover_log = _compile_tex(materials_dir / "cover_letter.tex")
             cover_pages = pdf_page_count(materials_dir / "cover_letter.pdf")
         resume_pages = pdf_page_count(materials_dir / "resume.pdf")
         report = OverflowReport(
@@ -555,24 +602,32 @@ def _render_and_fit(
         if not captured_initial:
             metrics.initial_resume_pages = resume_pages
             metrics.initial_cover_pages = cover_pages
+            report_out.initial_resume_pages = resume_pages
+            report_out.initial_cover_pages = cover_pages
             captured_initial = True
         if not report.resume_overflow and not report.cover_overflow:
             metrics.final_resume_pages = resume_pages
             metrics.final_cover_pages = cover_pages
             metrics.page_fit_attempts = page_fit
-            return resume, cover
+            metrics.pdf_fit_llm_repairs = llm_fit
+            report_out.final_resume_pages = resume_pages
+            report_out.final_cover_pages = cover_pages
+            report_out.used_llm = any(item.used_llm for item in report_out.changes)
+            return resume, cover, report_out
 
         if report.resume_vertical:
-            trimmed = apply_python_trim(resume, plan)
+            trimmed = apply_python_trim_step(resume, plan)
             if trimmed is not None:
-                resume = trimmed
+                resume, change = trimmed
+                report_out.changes.append(change)
                 continue
 
-        if page_fit >= MAX_PAGE_FIT_REPAIRS:
-            raise RuntimeError(
+        if llm_fit >= MAX_PDF_FIT_LLM_REPAIRS or page_fit >= MAX_PAGE_FIT_REPAIRS:
+            raise PipelineError(
+                PDF_OVERFLOW,
                 "Resume/cover letter still exceed 1 page after "
-                f"{MAX_PAGE_FIT_REPAIRS} repairs: "
-                + "; ".join(_overflow_issues(report, cover is not None))
+                f"{MAX_PDF_FIT_LLM_REPAIRS} LLM repairs: "
+                + "; ".join(_overflow_issues(report, cover is not None)),
             )
 
         if report.resume_overflow:
@@ -583,39 +638,92 @@ def _render_and_fit(
                     item = resume.experience[item_index]
                     record = _experience_record(bank, item.company, item.role)
                     current = item.bullets[bullet_index]
+                    item_id = (
+                        plan.experience_ids[item_index]
+                        if item_index < len(plan.experience_ids)
+                        else item.company
+                    )
                 else:
                     item = resume.projects[item_index]
                     record = _project_record(bank, item.name)
                     current = item.bullets[bullet_index]
+                    item_id = (
+                        plan.project_ids[item_index]
+                        if item_index < len(plan.project_ids)
+                        else item.name
+                    )
                 shortened = shorten_bullet(
                     current, max_chars=plan.layout.max_bullet_chars, record=record
                 )
                 resume = _set_resume_bullet(resume, kind, item_index, bullet_index, shortened)
                 page_fit += 1
+                llm_fit += 1
                 metrics.bullet_rewrites += 1
                 metrics.generation_attempts += 1
+                report_out.changes.append(
+                    FitChange(
+                        action="shortened_bullet",
+                        section="experience" if kind == "experience" else "project",
+                        item_id=item_id,
+                        item_index=item_index,
+                        bullet_index=bullet_index,
+                        detail=f"shortened {kind} bullet {bullet_index} of {item_id}",
+                        used_llm=True,
+                    )
+                )
                 continue
-            trimmed = apply_python_trim(resume, plan)
+            trimmed = apply_python_trim_step(resume, plan)
             if trimmed is not None:
-                resume = trimmed
+                resume, change = trimmed
+                report_out.changes.append(change)
                 page_fit += 1
                 continue
 
         if cover is not None and report.cover_overflow:
             cover = shorten_cover_letter(cover)
             page_fit += 1
+            llm_fit += 1
             metrics.cover_letter_repairs += 1
             metrics.generation_attempts += 1
+            report_out.changes.append(
+                FitChange(
+                    action="shortened_cover_letter",
+                    section="cover_letter",
+                    detail="shortened cover letter to fit one page",
+                    used_llm=True,
+                )
+            )
             continue
 
-        raise RuntimeError(
+        raise PipelineError(
+            PDF_OVERFLOW,
             "Could not repair PDF overflow: "
-            + "; ".join(_overflow_issues(report, cover is not None))
+            + "; ".join(_overflow_issues(report, cover is not None)),
         )
 
 
 def _blocking_validation_issues(issues: list[str]) -> list[str]:
     return [item for item in issues if "summary must be empty" not in item.casefold()]
+
+
+def _raise_resume_validation(issues: list[str], suffix: str = "") -> None:
+    blocking = _blocking_validation_issues(issues)
+    if not blocking:
+        return
+    text = "; ".join(blocking[:8])
+    prefix = "Resume failed Python validation" + suffix
+    if any("source" in item.casefold() or "numeric claim" in item.casefold() for item in blocking):
+        raise PipelineError(INVALID_PROVENANCE, f"{prefix}: {text}")
+    raise PipelineError(GENERATION_FAILURE, f"{prefix}: {text}")
+
+
+def _answers_result_from_payload(payload: dict) -> ApplicationAnswersResult:
+    raw = payload.get("answers")
+    if isinstance(raw, dict) and "answers" in raw:
+        return ApplicationAnswersResult.model_validate(raw)
+    if isinstance(raw, list):
+        return ApplicationAnswersResult.model_validate({"answers": raw})
+    return ApplicationAnswersResult.model_validate(payload)
 
 
 def process_job_file(job_path: Path) -> ProcessResult:
@@ -638,6 +746,7 @@ def process_job_file(job_path: Path) -> ProcessResult:
         )
 
     progress = _load_progress(job_path)
+    notion_url = None
     if progress:
         destination = Path(str(progress["output_dir"]))
         stage = str(progress.get("stage") or "")
@@ -646,6 +755,7 @@ def process_job_file(job_path: Path) -> ProcessResult:
         metrics = PipelineMetrics.model_validate(progress.get("metrics") or {})
         checker_used = str(progress.get("checker_model") or "")
         escalated = bool(progress.get("escalated"))
+        notion_url = str(progress.get("notion_url") or "") or None
     else:
         destination = output_dir_for(job)
         stage = ""
@@ -654,6 +764,7 @@ def process_job_file(job_path: Path) -> ProcessResult:
         checker_used = ""
         escalated = False
 
+    begin_usage_collection()
     inputs_dir, materials_dir, meta_dir = ensure_output_tree(destination)
 
     def persist(next_stage: str) -> None:
@@ -666,6 +777,7 @@ def process_job_file(job_path: Path) -> ProcessResult:
                 "graduation_year": graduation_year,
                 "checker_model": checker_used,
                 "escalated": escalated,
+                "notion_url": notion_url,
                 "metrics": metrics.model_dump(),
             },
         )
@@ -674,7 +786,11 @@ def process_job_file(job_path: Path) -> ProcessResult:
         plan = ApplicationPlan.model_validate(_read_json(meta_dir / "application_plan.json"))
         job = job.model_copy(update={"template": plan.template})
     else:
-        plan = build_application_plan(job, bank)
+        reused = find_reusable_plan(job, exclude_output=destination)
+        plan = build_application_plan(job, bank, reuse=reused)
+        metrics.reused_plan = bool(
+            reused is not None and "reused ranking" in plan.template_reason.casefold()
+        )
         job = job.model_copy(update={"template": plan.template})
         dump_yaml(job.model_dump(), inputs_dir / "job.yaml")
         _write_json(meta_dir / "application_plan.json", plan.model_dump())
@@ -711,15 +827,12 @@ def process_job_file(job_path: Path) -> ProcessResult:
                 draft.to_tailored(), plan.layout.max_bullet_chars
             )
             if still_long:
-                raise RuntimeError(
+                raise PipelineError(
+                    GENERATION_FAILURE,
                     "Resume bullets still exceed the line limit after targeted repairs: "
-                    + "; ".join(still_long[:5])
+                    + "; ".join(still_long[:5]),
                 )
-            blocking = _blocking_validation_issues(issues)
-            if blocking:
-                raise RuntimeError(
-                    "Resume failed Python validation: " + "; ".join(blocking[:8])
-                )
+            _raise_resume_validation(issues)
         _write_json(meta_dir / "resume_draft.json", draft.model_dump())
         persist("resume_drafted")
         stage = "resume_drafted"
@@ -742,8 +855,9 @@ def process_job_file(job_path: Path) -> ProcessResult:
             metrics.generation_attempts += 1
             cl_issues = validate_cover_letter(cover)
             if cl_issues and metrics.cover_letter_repairs >= MAX_COVER_LETTER_REPAIRS:
-                raise RuntimeError(
-                    "Cover letter failed Python validation: " + "; ".join(cl_issues[:8])
+                raise PipelineError(
+                    GENERATION_FAILURE,
+                    "Cover letter failed Python validation: " + "; ".join(cl_issues[:8]),
                 )
             _write_json(meta_dir / "cover_letter_draft.json", cover.model_dump())
         persist("cover_drafted")
@@ -790,12 +904,7 @@ def process_job_file(job_path: Path) -> ProcessResult:
                 draft, plan, allowed, bank.profile, bank
             )
             metrics.validation_failures += len(issues)
-            blocking = _blocking_validation_issues(issues)
-            if blocking:
-                raise RuntimeError(
-                    "Resume failed Python validation after repair: "
-                    + "; ".join(blocking[:8])
-                )
+            _raise_resume_validation(issues, " after repair")
             if cover is not None:
                 cl_issues = validate_cover_letter(cover)
                 metrics.validation_failures += len(cl_issues)
@@ -805,9 +914,10 @@ def process_job_file(job_path: Path) -> ProcessResult:
                     metrics.generation_attempts += 1
                     cl_issues = validate_cover_letter(cover)
                     if cl_issues:
-                        raise RuntimeError(
+                        raise PipelineError(
+                            GENERATION_FAILURE,
                             "Cover letter failed Python validation after repair: "
-                            + "; ".join(cl_issues[:8])
+                            + "; ".join(cl_issues[:8]),
                         )
             resume = apply_graduation_to_resume(draft.to_tailored(), graduation_year)
             if cover is not None:
@@ -816,6 +926,9 @@ def process_job_file(job_path: Path) -> ProcessResult:
                 job, plan, bank, resume, cover
             )
             metrics.checker_escalated = metrics.checker_escalated or escalated
+        if not review.approved:
+            metrics.manual_review = True
+            metrics.manual_review_reason = review.summary or "Semantic review still has issues."
         _write_json(meta_dir / "review.json", review.model_dump())
         _write_json(meta_dir / "resume_draft.json", draft.model_dump())
         if cover is not None:
@@ -831,7 +944,7 @@ def process_job_file(job_path: Path) -> ProcessResult:
             cover = CoverLetter.model_validate(_read_json(cover_final))
     else:
         resume = apply_graduation_to_resume(draft.to_tailored(), graduation_year)
-        resume, cover = _render_and_fit(
+        resume, cover, fit_report = _render_and_fit(
             job,
             bank.profile.contact,
             resume,
@@ -842,6 +955,20 @@ def process_job_file(job_path: Path) -> ProcessResult:
             metrics,
         )
         draft = merge_fitted_into_draft(draft, resume)
+        if fit_report.used_llm:
+            resume = apply_graduation_to_resume(draft.to_tailored(), graduation_year)
+            review, fit_escalated, fit_checker = review_materials(
+                job, plan, bank, resume, cover
+            )
+            checker_used = fit_checker
+            escalated = escalated or fit_escalated
+            metrics.checker_escalated = metrics.checker_escalated or fit_escalated
+            if not review.approved:
+                metrics.manual_review = True
+                metrics.manual_review_reason = (
+                    review.summary or "Semantic issues remain after PDF-fit LLM rewrite."
+                )
+            _write_json(meta_dir / "review.json", review.model_dump())
         issues = validate_draft_resume(
             draft,
             plan,
@@ -851,20 +978,17 @@ def process_job_file(job_path: Path) -> ProcessResult:
             enforce_layout_mins=False,
         )
         metrics.validation_failures += len(issues)
-        blocking = _blocking_validation_issues(issues)
-        if blocking:
-            raise RuntimeError(
-                "Resume failed Python validation after PDF fitting: "
-                + "; ".join(blocking[:8])
-            )
+        _raise_resume_validation(issues, " after PDF fitting")
         if cover is not None:
             cl_issues = validate_cover_letter(cover)
             metrics.validation_failures += len(cl_issues)
             if cl_issues:
-                raise RuntimeError(
+                raise PipelineError(
+                    GENERATION_FAILURE,
                     "Cover letter failed Python validation after PDF fitting: "
-                    + "; ".join(cl_issues[:8])
+                    + "; ".join(cl_issues[:8]),
                 )
+        _write_json(meta_dir / "fit_report.json", fit_report.model_dump())
         _write_json(meta_dir / "resume_final.json", draft.model_dump())
         if cover is not None:
             _write_json(meta_dir / "cover_letter_final.json", cover.model_dump())
@@ -874,11 +998,17 @@ def process_job_file(job_path: Path) -> ProcessResult:
     answers_payload: dict | None = None
     answers_checker_approved: bool | None = None
     answers_checker_summary = ""
-    if job.questions:
+    if _stage_at_least(stage, "answers_generated"):
+        answers_path = meta_dir / "answers.json"
+        if answers_path.is_file():
+            answers_payload = _read_json(answers_path)  # type: ignore[assignment]
+            if isinstance(answers_payload, dict):
+                answers_checker_approved = answers_payload.get("checker_approved")  # type: ignore[assignment]
+                answers_checker_summary = str(answers_payload.get("checker_summary") or "")
+    elif job.questions:
         answered = generate_answers(job, plan, bank)
-        (materials_dir / "answers.md").write_text(
-            format_answers_markdown(answered.answers), encoding="utf-8"
-        )
+        if answered.revised:
+            metrics.answer_repairs += 1
         answers_payload = {
             "answers": answered.answers.model_dump(),
             "writer_model": answered.writer_model,
@@ -891,8 +1021,64 @@ def process_job_file(job_path: Path) -> ProcessResult:
         }
         answers_checker_approved = answered.review.approved
         answers_checker_summary = answered.review.summary
+        _write_json(meta_dir / "answers.json", answers_payload)
+        persist("answers_generated")
+        stage = "answers_generated"
+    else:
+        persist("answers_generated")
+        stage = "answers_generated"
 
-    notion_url = create_application_page(job, destination, referral)
+    if not _stage_at_least(stage, "answers_validated"):
+        if job.questions and isinstance(answers_payload, dict):
+            answers_result = _answers_result_from_payload(answers_payload)
+            length_issues = validate_answers(answers_result)
+            metrics.validation_failures += len(length_issues)
+            if length_issues:
+                if metrics.answer_repairs >= MAX_ANSWER_REPAIRS:
+                    metrics.manual_review = True
+                    metrics.manual_review_reason = "; ".join(length_issues[:3])
+                else:
+                    metrics.answer_repairs += 1
+                    metrics.manual_review = True
+                    metrics.manual_review_reason = "; ".join(length_issues[:3])
+            (materials_dir / "answers.md").write_text(
+                format_answers_markdown(answers_result), encoding="utf-8"
+            )
+        persist("answers_validated")
+        stage = "answers_validated"
+
+    if not notion_url:
+        try:
+            notion_url = create_application_page(job, destination, referral)
+        except Exception as error:
+            persist("answers_validated")
+            raise PipelineError(UPLOAD_FAILURE, f"Notion upload failed: {error}") from error
+        persist("answers_validated")
+
+    usage = summarize_usage()
+    metrics.llm_calls = usage.call_count
+    metrics.input_tokens = usage.input_tokens
+    metrics.cached_input_tokens = usage.cached_input_tokens
+    metrics.output_tokens = usage.output_tokens
+    metrics.reasoning_tokens = usage.reasoning_tokens
+    metrics.cost_usd = usage.application_usd
+    metrics.cached_input_pct = usage.cached_input_pct
+    append_usage_log(
+        usage_records(),
+        extra={
+            "application": str(destination),
+            "company": job.company,
+            "title": job.title,
+        },
+    )
+    costs = aggregate_costs()
+    costs.application_usd = usage.application_usd
+    costs.call_count = usage.call_count
+    costs.input_tokens = usage.input_tokens
+    costs.cached_input_tokens = usage.cached_input_tokens
+    costs.output_tokens = usage.output_tokens
+    costs.reasoning_tokens = usage.reasoning_tokens
+    costs.cached_input_pct = usage.cached_input_pct
     dump_yaml(
         {
             "company": job.company,
@@ -915,6 +1101,9 @@ def process_job_file(job_path: Path) -> ProcessResult:
             "graduation": graduation_year,
             "cover_letter": plan.cover_letter,
             "answers": answers_payload,
+            "cost": costs.model_dump(),
+            "manual_review": metrics.manual_review,
+            "manual_review_reason": metrics.manual_review_reason,
             "metrics": metrics.model_dump(),
             "generated_at": datetime.now().isoformat(timespec="seconds"),
         },
@@ -977,9 +1166,16 @@ def finish_success(job_path: Path, result: ProcessResult) -> None:
 
 
 def finish_failure(job_path: Path, error: Exception) -> None:
+    category = infer_failure_category(error)
     message = str(error)
-    error_sidecar(job_path).write_text(message + "\n", encoding="utf-8")
-    notify("Job application failed", f"{job_path.name}: {message[:180]}")
+    error_sidecar(job_path).write_text(
+        f"category: {category}\n{message}\n", encoding="utf-8"
+    )
+    progress = _load_progress(job_path)
+    if progress is not None:
+        progress["failure_category"] = category
+        _save_progress(job_path, progress)
+    notify("Job application failed", f"{job_path.name} [{category}]: {message[:160]}")
 
 
 def run_job_file(job_path: Path) -> ProcessResult:

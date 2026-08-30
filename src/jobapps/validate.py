@@ -2,8 +2,6 @@
 
 from __future__ import annotations
 
-import re
-
 from jobapps.career import CareerBank, CareerProfile, ExperienceRecord, ProjectRecord
 from jobapps.models import (
     ApplicationAnswersResult,
@@ -15,6 +13,7 @@ from jobapps.models import (
     SourcedBullet,
     TailoredResume,
     is_stack_bullet,
+    numeric_claim_tokens,
     overlong_answer_issues,
     overlong_bullet_issues,
     unknown_skill_issues,
@@ -24,12 +23,9 @@ from jobapps.plan import selected_experiences, selected_projects
 MAX_SEMANTIC_REVISIONS = 1
 MAX_BULLET_REPAIRS = 2
 MAX_PAGE_FIT_REPAIRS = 2
+MAX_PDF_FIT_LLM_REPAIRS = 2
 MAX_COVER_LETTER_REPAIRS = 1
-
-_NUMERIC_CLAIM_RE = re.compile(
-    r"(?<![A-Za-z0-9])(\d+(?:\.\d+)?)(?:\s*(%|[Kk]|[Mm](?:illion)?))?(?![A-Za-z])"
-)
-_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
+MAX_ANSWER_REPAIRS = 1
 
 
 def content_bullets(bullets: list[str]) -> list[str]:
@@ -157,23 +153,6 @@ def _project_record(
         if record.name == item.name:
             return record
     return None
-
-
-def canonical_number(raw: str) -> str:
-    if "." in raw:
-        return format(float(raw), "g")
-    return str(int(raw))
-
-
-def numeric_claim_tokens(text: str) -> list[str]:
-    """Extract normalized numeric claims, skipping years."""
-    tokens: list[str] = []
-    for match in _NUMERIC_CLAIM_RE.finditer(text or ""):
-        number = match.group(1)
-        if _YEAR_RE.fullmatch(number):
-            continue
-        tokens.append(canonical_number(number))
-    return tokens
 
 
 def _metric_provenance_issues(

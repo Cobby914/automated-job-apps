@@ -14,6 +14,31 @@ RECOMMENDED_SKILLS_HEADING = "Recommended General-Purpose Skills Section"
 RESUME_TEMPLATE_NAMES = frozenset({"swe", "ai", "default"})
 AUTO_TEMPLATE_ALIASES = frozenset({"auto", ""})
 
+_NUMERIC_CLAIM_RE = re.compile(
+    r"(?<![A-Za-z0-9])(\d{1,3}(?:,\d{3})+|\d+(?:\.\d+)?)"
+    r"(?:\s*(%|[Kk]|[Mm](?:illion)?|s(?:ec(?:onds?)?)?))?"
+    r"(?![A-Za-z0-9])"
+)
+_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
+
+
+def canonical_number(raw: str) -> str:
+    cleaned = raw.replace(",", "")
+    if "." in cleaned:
+        return format(float(cleaned), "g")
+    return str(int(cleaned))
+
+
+def numeric_claim_tokens(text: str) -> list[str]:
+    """Extract normalized numeric claims, skipping years."""
+    tokens: list[str] = []
+    for match in _NUMERIC_CLAIM_RE.finditer(text or ""):
+        number = match.group(1)
+        if _YEAR_RE.fullmatch(number.replace(",", "")):
+            continue
+        tokens.append(canonical_number(number))
+    return tokens
+
 _SKILLS_HEADING_RE = re.compile(r"^##\s+(.+?)\s*$")
 _SKILLS_BULLET_RE = re.compile(r"^-\s+(.+?)\s*$")
 _SKILLS_BOLD_LINE_RE = re.compile(r"^\*\*(.+?):\*\*\s*(.+?)\s*$")
@@ -169,6 +194,10 @@ class CoverLetter(BaseModel):
 class SourcedBullet(BaseModel):
     text: str
     sources: list[str] = Field(default_factory=list)
+
+
+class TextPayload(BaseModel):
+    text: str
 
 
 def coerce_sourced_bullets(value: object) -> object:
@@ -424,6 +453,54 @@ class ReviewResult(BaseModel):
 class RankedSelection(BaseModel):
     record_id: str
     score: float
+    priority: int = 0
+    explanation: str = ""
+    matched_terms: list[str] = Field(default_factory=list)
+
+
+class UsageRecord(BaseModel):
+    provider: str
+    model: str
+    purpose: str = ""
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
+    latency_ms: float = 0.0
+    estimated_cost_usd: float = 0.0
+
+
+class CostSummary(BaseModel):
+    application_usd: float = 0.0
+    daily_usd: float = 0.0
+    weekly_usd: float = 0.0
+    average_usd_per_application: float = 0.0
+    call_count: int = 0
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
+    cached_input_pct: float = 0.0
+
+
+class FitChange(BaseModel):
+    action: str
+    section: str
+    item_id: str = ""
+    item_index: int | None = None
+    bullet_index: int | None = None
+    paragraph_index: int | None = None
+    detail: str = ""
+    used_llm: bool = False
+
+
+class FitReport(BaseModel):
+    changes: list[FitChange] = Field(default_factory=list)
+    used_llm: bool = False
+    initial_resume_pages: int | None = None
+    final_resume_pages: int | None = None
+    initial_cover_pages: int | None = None
+    final_cover_pages: int | None = None
 
 
 class LayoutBudget(BaseModel):
@@ -474,6 +551,19 @@ class PipelineMetrics(BaseModel):
     final_cover_pages: int | None = None
     checker_escalated: bool = False
     semantic_revisions: int = 0
+    pdf_fit_llm_repairs: int = 0
+    answer_repairs: int = 0
+    manual_review: bool = False
+    manual_review_reason: str = ""
+    failure_category: str = ""
+    reused_plan: bool = False
+    llm_calls: int = 0
+    input_tokens: int = 0
+    cached_input_tokens: int = 0
+    output_tokens: int = 0
+    reasoning_tokens: int = 0
+    cost_usd: float = 0.0
+    cached_input_pct: float = 0.0
 
 
 def overlong_answer_issues(result: ApplicationAnswersResult) -> list[str]:

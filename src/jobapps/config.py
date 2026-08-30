@@ -1,4 +1,4 @@
-"""Project root, folder paths, and environment loading."""
+"""Project root, folder paths, environment loading, and explicit model config."""
 
 from __future__ import annotations
 
@@ -41,6 +41,8 @@ RESUME_ADDITIONS_DIR = ROOT / "resume_additions"
 CAREER_DIR = ROOT / "career"
 SKILLS_BANK_PATH = CAREER_DIR / "skills.yaml"
 CONNECTIONS_PATH = ROOT / "connections" / "connections.yaml"
+USAGE_LOG_PATH = OUTPUT_DIR / "usage.jsonl"
+RANKING_LOG_PATH = OUTPUT_DIR / "ranking_log.jsonl"
 
 
 def load_env() -> None:
@@ -54,43 +56,125 @@ def require_env(name: str) -> str:
     return value
 
 
+def _env(name: str) -> str:
+    return os.getenv(name, "").strip()
+
+
+def configured_provider() -> str:
+    override = _env("LLM_PROVIDER").lower()
+    if override in {"openai", "anthropic", "cursor"}:
+        return override
+    if _env("OPENAI_API_KEY"):
+        return "openai"
+    if _env("ANTHROPIC_API_KEY"):
+        return "anthropic"
+    return "cursor"
+
+
+def reviewer_provider() -> str:
+    override = _env("LLM_REVIEWER_PROVIDER").lower()
+    if override in {"openai", "anthropic", "cursor"}:
+        return override
+    return configured_provider()
+
+
 def cursor_writer_model() -> str:
-    return (
-        os.getenv("CURSOR_WRITER_MODEL", os.getenv("CURSOR_MODEL", "gpt-5.6-sol")).strip()
-        or "gpt-5.6-sol"
-    )
+    return _env("CURSOR_WRITER_MODEL") or _env("CURSOR_MODEL") or "gpt-5.6-sol"
 
 
 def cursor_checker_model() -> str:
-    return os.getenv("CURSOR_CHECKER_MODEL", "claude-4.5-sonnet").strip() or "claude-4.5-sonnet"
+    return _env("CURSOR_CHECKER_MODEL") or "claude-4.5-sonnet"
 
 
 def cursor_escalation_model() -> str:
-    return os.getenv("CURSOR_ESCALATION_MODEL", "claude-opus-5").strip() or "claude-opus-5"
+    return _env("CURSOR_ESCALATION_MODEL") or "claude-opus-5"
 
 
 def writer_model() -> str:
-    explicit = os.getenv("OPENAI_WRITER_MODEL", "").strip()
+    explicit = _env("OPENAI_WRITER_MODEL")
     if explicit:
         return explicit
-    if os.getenv("OPENAI_API_KEY", "").strip():
-        return "gpt-4.1"
+    if _env("OPENAI_API_KEY") and configured_provider() == "openai":
+        raise RuntimeError(
+            "OPENAI_WRITER_MODEL is not set. Add it to .env (see .env.example)."
+        )
     return cursor_writer_model()
 
 
 def checker_model() -> str:
-    return (
-        os.getenv("ANTHROPIC_CHECKER_MODEL", "").strip()
-        or cursor_checker_model()
-    )
+    """Cheap semantic reviewer. Alias: reviewer_model()."""
+    provider = reviewer_provider()
+    if provider == "openai":
+        explicit = _env("OPENAI_REVIEWER_MODEL")
+        if explicit:
+            return explicit
+        if _env("OPENAI_API_KEY"):
+            raise RuntimeError(
+                "OPENAI_REVIEWER_MODEL is not set. Add it to .env (see .env.example)."
+            )
+    if provider == "anthropic":
+        explicit = _env("ANTHROPIC_CHECKER_MODEL")
+        if explicit:
+            return explicit
+        if _env("ANTHROPIC_API_KEY"):
+            raise RuntimeError(
+                "ANTHROPIC_CHECKER_MODEL is not set. Add it to .env (see .env.example)."
+            )
+    return cursor_checker_model()
+
+
+def reviewer_model() -> str:
+    return checker_model()
+
+
+def repair_model() -> str:
+    explicit = _env("OPENAI_REPAIR_MODEL")
+    if explicit:
+        return explicit
+    if _env("OPENAI_API_KEY") and configured_provider() == "openai":
+        raise RuntimeError(
+            "OPENAI_REPAIR_MODEL is not set. Add it to .env (see .env.example)."
+        )
+    return writer_model()
 
 
 def escalation_model() -> str:
-    return (
-        os.getenv("ANTHROPIC_ESCALATION_MODEL", "").strip()
-        or cursor_escalation_model()
-    )
+    provider = reviewer_provider()
+    if provider == "openai":
+        explicit = _env("OPENAI_ESCALATION_MODEL") or _env("OPENAI_WRITER_MODEL")
+        if explicit:
+            return explicit
+        if _env("OPENAI_API_KEY"):
+            raise RuntimeError(
+                "OPENAI_ESCALATION_MODEL is not set. Add it to .env (see .env.example)."
+            )
+    if provider == "anthropic":
+        explicit = _env("ANTHROPIC_ESCALATION_MODEL")
+        if explicit:
+            return explicit
+        if _env("ANTHROPIC_API_KEY"):
+            raise RuntimeError(
+                "ANTHROPIC_ESCALATION_MODEL is not set. Add it to .env (see .env.example)."
+            )
+    return cursor_escalation_model()
+
+
+def llm_max_retries() -> int:
+    raw = _env("LLM_MAX_RETRIES") or "3"
+    return max(0, int(raw))
+
+
+def llm_retry_base_seconds() -> float:
+    raw = _env("LLM_RETRY_BASE_SECONDS") or "1"
+    return max(0.1, float(raw))
+
+
+def llm_daily_budget_usd() -> float | None:
+    raw = _env("LLM_DAILY_BUDGET_USD")
+    if not raw:
+        return None
+    return float(raw)
 
 
 def notion_configured() -> bool:
-    return bool(os.getenv("NOTION_TOKEN", "").strip() and os.getenv("NOTION_DATABASE_ID", "").strip())
+    return bool(_env("NOTION_TOKEN") and _env("NOTION_DATABASE_ID"))
