@@ -69,5 +69,28 @@ def cursor_escalation_model() -> str:
     return os.getenv("CURSOR_ESCALATION_MODEL", "claude-opus-5").strip() or "claude-opus-5"
 
 
+def writer_model() -> str:
+    explicit = os.getenv("OPENAI_WRITER_MODEL", "").strip()
+    if explicit:
+        return explicit
+    if os.getenv("OPENAI_API_KEY", "").strip():
+        return "gpt-4.1"
+    return cursor_writer_model()
+
+
+def checker_model() -> str:
+    return (
+        os.getenv("ANTHROPIC_CHECKER_MODEL", "").strip()
+        or cursor_checker_model()
+    )
+
+
+def escalation_model() -> str:
+    return (
+        os.getenv("ANTHROPIC_ESCALATION_MODEL", "").strip()
+        or cursor_escalation_model()
+    )
+
+
 def notion_configured() -> bool:
     return bool(os.getenv("NOTION_TOKEN", "").strip() and os.getenv("NOTION_DATABASE_ID", "").strip())

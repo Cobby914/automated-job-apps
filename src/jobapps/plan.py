@@ -3,8 +3,14 @@
 from __future__ import annotations
 
 from jobapps.career import CareerBank, ExperienceRecord, ProjectRecord
-from jobapps.models import ApplicationPlan, Job, LayoutBudget
-from jobapps.ranking import rank_experiences, rank_projects, select_skills, select_template
+from jobapps.models import ApplicationPlan, Job, LayoutBudget, RankedSelection
+from jobapps.ranking import (
+    rank_experiences,
+    rank_projects,
+    select_ranked,
+    select_skills,
+    select_template,
+)
 
 
 DEFAULT_LAYOUT = LayoutBudget()
@@ -21,12 +27,18 @@ def build_application_plan(
     exp_ranked = rank_experiences(job, bank, template)
     proj_ranked = rank_projects(job, bank, template)
 
-    experience_ids = [item.record_id for item in exp_ranked[: budget.max_experiences]]
-    if len(experience_ids) < budget.min_experiences:
-        experience_ids = [item.record_id for item in exp_ranked[: budget.min_experiences]]
-    project_ids = [item.record_id for item in proj_ranked[: budget.max_projects]]
-    if len(project_ids) < budget.min_projects:
-        project_ids = [item.record_id for item in proj_ranked[: budget.min_projects]]
+    exp_selected = select_ranked(
+        exp_ranked,
+        min_count=budget.min_experiences,
+        max_count=budget.max_experiences,
+    )
+    proj_selected = select_ranked(
+        proj_ranked,
+        min_count=budget.min_projects,
+        max_count=budget.max_projects,
+    )
+    experience_ids = [item.record_id for item in exp_selected]
+    project_ids = [item.record_id for item in proj_selected]
 
     # Highest relevance first; trim drops from the end.
     resume_priorities = [*experience_ids, *project_ids]
@@ -51,6 +63,14 @@ def build_application_plan(
         cover_letter=job.cover_letter,
         cover_letter_source_ids=cover_sources,
         resume_priorities=resume_priorities,
+        experience_scores=[
+            RankedSelection(record_id=item.record_id, score=item.score)
+            for item in exp_selected
+        ],
+        project_scores=[
+            RankedSelection(record_id=item.record_id, score=item.score)
+            for item in proj_selected
+        ],
     )
 
 

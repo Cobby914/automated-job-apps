@@ -32,13 +32,13 @@
       text: Improved model F1 from approximately 0.40 to 0.70.
   bullets:
     - id: genome-sequencing.bullet.1
-      text: Constructed a pipeline conjoining Humsavar and dbNSFP using DuckDB and pandas, improving F1 scores by 70%.
+      text: Constructed a pipeline conjoining Humsavar and dbNSFP using DuckDB and pandas, raising F1 from 0.40 to 0.70.
       sources: [genome-sequencing.fact.2, genome-sequencing.metric.1]
     - id: genome-sequencing.bullet.2
-      text: Contributed data exploration using seaborn, pandas, and Matplotlib, increasing data readability for model tuning.
+      text: Contributed data exploration using pandas and Matplotlib, increasing data readability for model tuning.
       sources: [genome-sequencing.fact.2]
     - id: genome-sequencing.bullet.3
-      text: Developed a neural network learner using Python, PyTorch, pandas, and scikit-learn with roughly 70% F1 score.
+      text: Developed a neural network learner using Python, PyTorch, pandas, and scikit-learn with an F1 of 0.70.
       sources: [genome-sequencing.fact.3, genome-sequencing.metric.1]
     - id: genome-sequencing.bullet.4
       text: "Stack: Python, DuckDB, pandas, PyTorch, scikit-learn."
@@ -174,7 +174,7 @@
       text: Developed a full-stack platform for students to find projects using JavaScript, TypeScript, CSS, and React.
       sources: [reel-in.fact.1, reel-in.fact.2]
     - id: reel-in.bullet.2
-      text: Created REST API routes for project pages using PostgreSQL, React, and JavaScript, increasing use by 50%.
+      text: Created REST API routes for project pages using PostgreSQL, React, and JavaScript, used by about 50 students.
       sources: [reel-in.fact.2, reel-in.metric.1]
     - id: reel-in.bullet.3
       text: Implemented navbar, modals, and cards using React and CSS, reused by 5+ developers across the project team.
@@ -224,7 +224,7 @@
       text: Created a smart white cane detecting elevation changes and incoming objects using T.O.F and ultrasonic sensors.
       sources: [smart-step.fact.1, smart-step.fact.2]
     - id: smart-step.bullet.2
-      text: Developed a buzzer feedback system for blind and deaf users from sensor inputs with low-latency physical testing.
+      text: Developed a buzzer feedback system for visually impaired users from sensor inputs with low-latency physical testing.
       sources: [smart-step.fact.3]
     - id: smart-step.bullet.3
       text: Relayed data from ESP32 to AWS cloud for a Bluetooth voice feature with approximately 90% accuracy in trials.
@@ -242,22 +242,23 @@
   technologies:
     - Next.js
     - React
+    - Tailwind CSS
     - Zustand
     - Radix UI
   stack: Next.js, React, Tailwind CSS, Zustand, Radix UI
   summary: >
-    Built a personal software-engineering portfolio using Next.js, React, Zustand,
-    and Radix UI as a production-facing showcase for software, research, and
+    Built a personal software-engineering portfolio using Next.js, React, Tailwind CSS,
+    Zustand, and Radix UI as a production-facing showcase for software, research, and
     engineering work.
   facts:
     - id: personal-website.fact.1
-      text: Built a personal software-engineering portfolio using Next.js, React, Zustand, and Radix UI.
+      text: Built a personal software-engineering portfolio using Next.js, React, Tailwind CSS, Zustand, and Radix UI.
     - id: personal-website.fact.2
       text: Implemented persistent light/dark theme state with Zustand and localStorage alongside responsive navigation.
   metrics: []
   bullets:
     - id: personal-website.bullet.1
-      text: Built and deployed a responsive portfolio using Next.js 14, React, Tailwind CSS, Zustand, and Radix UI.
+      text: Built and deployed a responsive portfolio using Next.js, React, Tailwind CSS, Zustand, and Radix UI.
       sources: [personal-website.fact.1]
     - id: personal-website.bullet.2
       text: Implemented persistent light/dark theme state with Zustand and localStorage alongside responsive navigation.

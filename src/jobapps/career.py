@@ -46,6 +46,9 @@ class ExperienceRecord(BaseModel):
         ids.update(item.id for item in self.bullets)
         return ids
 
+    def fact_metric_ids(self) -> set[str]:
+        return {item.id for item in self.facts} | {item.id for item in self.metrics}
+
     def prompt_payload(self) -> dict[str, object]:
         return {
             "id": self.id,
@@ -82,6 +85,9 @@ class ProjectRecord(BaseModel):
         ids.update(item.id for item in self.metrics)
         ids.update(item.id for item in self.bullets)
         return ids
+
+    def fact_metric_ids(self) -> set[str]:
+        return {item.id for item in self.facts} | {item.id for item in self.metrics}
 
     def content_bullets(self) -> list[CanonicalBullet]:
         return [item for item in self.bullets if not item.text.strip().lower().startswith("stack:")]
@@ -183,6 +189,23 @@ def _validate_unique_ids(bank: CareerBank) -> None:
         raise ValueError("Duplicate career source ids: " + ", ".join(duplicates[:10]))
 
 
+def _validate_canonical_sources(bank: CareerBank) -> None:
+    errors: list[str] = []
+    for record in [*bank.experiences, *bank.projects]:
+        known = record.fact_metric_ids()
+        for bullet in record.bullets:
+            if bullet.text.strip().lower().startswith("stack:"):
+                continue
+            if not bullet.sources:
+                errors.append(f"{bullet.id} has no sources")
+                continue
+            for source_id in bullet.sources:
+                if source_id not in known:
+                    errors.append(f"{bullet.id} cites unknown source {source_id}")
+    if errors:
+        raise ValueError("Career bank source errors: " + "; ".join(errors[:12]))
+
+
 def load_career_bank(directory: Path | None = None) -> CareerBank:
     root = directory or CAREER_DIR
     profile_data = _read_yaml(root / "profile.yaml")
@@ -210,6 +233,7 @@ def load_career_bank(directory: Path | None = None) -> CareerBank:
         skills=load_skills_inventory(root / "skills.yaml"),
     )
     _validate_unique_ids(bank)
+    _validate_canonical_sources(bank)
     return bank
 
 

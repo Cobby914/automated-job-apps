@@ -6,16 +6,18 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
-from cursor_sdk import Agent, AgentOptions, CursorAgentError, LocalAgentOptions
-
 from jobapps.career import CareerBank, ExperienceRecord, ProjectRecord
 from jobapps.config import (
     COVER_LETTER_EXAMPLE_PATH,
-    ROOT,
-    cursor_checker_model,
-    cursor_escalation_model,
-    cursor_writer_model,
-    require_env,
+    checker_model,
+    escalation_model,
+    writer_model,
+)
+from jobapps.llm import (
+    extract_json,
+    generate_structured,
+    generate_text,
+    review as llm_review,
 )
 from jobapps.models import (
     ApplicationAnswer,
@@ -75,7 +77,7 @@ CHECKER_PROMPT = """\
 You review a tailored resume and optional cover letter for grounding, relevance, and voice.
 
 Python already checked bullet length, skill whitelist, bullet counts, required sections, \
-Stack lines, and education fields. Do not reject for those mechanical issues.
+Stack lines, education fields, and source ids. Do not reject for those mechanical issues.
 
 Approve only if all of these are true:
 - No invented employers, titles, dates, degrees, schools, projects, skills, or outcomes.
@@ -85,7 +87,20 @@ Approve only if all of these are true:
 - If a cover letter is present: first person, specific, not a resume restatement, \
 not generic, 4-6 paragraphs of real substance.
 
-Return JSON only matching the schema. No markdown, no code fences, no commentary.
+Return JSON only matching the schema. issues must be objects with:
+- type: ungrounded | invention | generic | irrelevant | voice | unsupported_claim | other
+- section: experience | project | cover_letter | resume | answers
+- item_id: career record id such as uci-scalesense (empty for cover_letter/resume)
+- bullet_index: 0-based content bullet index when section is experience or project
+- paragraph_index: 0-based when section is cover_letter
+- location: experience[i].bullets[j], projects[i].bullets[j], cover_letter.paragraphs[k], \
+or resume (fallback if item_id is unknown)
+- code: same as type
+- message: one specific sentence
+- severity: error or warning
+Do not use a bare list of strings for issues.
+Identify experiences and projects by career record id, not only array index.
+No markdown, no code fences, no commentary.
 Do not edit files, run commands, or use tools.
 """
 
@@ -122,7 +137,17 @@ Approve only if all of these are true:
 uses that count when enough grounded material exists.
 - Tone is first-person, specific, and appropriate for a real application.
 
-Return JSON only matching the schema. No markdown, no code fences, no commentary.
+Return JSON only matching the schema. issues must be objects with:
+- type: ungrounded | invention | generic | irrelevant | voice | unsupported_claim | other
+- section: answers
+- item_id: empty
+- paragraph_index: omitted
+- location: answers[i]
+- code: same as type
+- message: one specific sentence
+- severity: error or warning
+Do not use a bare list of strings for issues.
+No markdown, no code fences, no commentary.
 Do not edit files, run commands, or use tools.
 """
 
@@ -131,74 +156,9 @@ def _dump(data: object) -> str:
     return json.dumps(data, indent=2, ensure_ascii=False)
 
 
-def extract_json(text: str) -> str:
-    cleaned = text.strip()
-    if cleaned.startswith("```"):
-        lines = cleaned.splitlines()
-        if lines and lines[-1].strip().startswith("```"):
-            lines = lines[1:-1]
-        else:
-            lines = lines[1:]
-        if lines and lines[0].strip().lower() in {"json", "jsonc"}:
-            lines = lines[1:]
-        cleaned = "\n".join(lines).strip()
-    start = cleaned.find("{")
-    end = cleaned.rfind("}")
-    if start == -1 or end == -1 or end <= start:
-        raise RuntimeError("Cursor did not return JSON.")
-    return cleaned[start : end + 1]
-
-
 def run_prompt(prompt: str, model: str) -> str:
-    try:
-        result = Agent.prompt(
-            prompt,
-            AgentOptions(
-                api_key=require_env("CURSOR_API_KEY"),
-                model=model,
-                local=LocalAgentOptions(cwd=str(ROOT)),
-                tools=[],
-            ),
-        )
-    except CursorAgentError as error:
-        raise RuntimeError(f"Cursor agent failed to start ({model}): {error}") from error
-
-    if getattr(result, "status", None) == "error":
-        detail = getattr(result, "result", None) or result.status
-        raise RuntimeError(f"Cursor run failed ({model}): {detail}")
-
-    text = getattr(result, "result", None)
-    if not text or not str(text).strip():
-        raise RuntimeError(f"Cursor returned no text ({model}).")
-    return str(text)
-
-
-def _parse_draft_resume(text: str) -> DraftResume:
-    try:
-        return DraftResume.model_validate_json(extract_json(text))
-    except Exception as error:
-        raise RuntimeError(f"Writer returned invalid resume JSON: {error}") from error
-
-
-def _parse_cover_letter(text: str) -> CoverLetter:
-    try:
-        return CoverLetter.model_validate_json(extract_json(text))
-    except Exception as error:
-        raise RuntimeError(f"Writer returned invalid cover letter JSON: {error}") from error
-
-
-def _parse_review(text: str) -> ReviewResult:
-    try:
-        return ReviewResult.model_validate_json(extract_json(text))
-    except Exception as error:
-        raise RuntimeError(f"Checker returned invalid review JSON: {error}") from error
-
-
-def _parse_answers(text: str) -> ApplicationAnswersResult:
-    try:
-        return ApplicationAnswersResult.model_validate_json(extract_json(text))
-    except Exception as error:
-        raise RuntimeError(f"Writer returned invalid application answers JSON: {error}") from error
+    """Backward-compatible single-blob call. Prefer generate_text() for cacheable prompts."""
+    return generate_text(system="", user=prompt, model=model, cache_system=False)
 
 
 def load_cover_letter_example(path: Path | None = None) -> str:
@@ -241,7 +201,7 @@ def generate_resume_draft(
     experiences = selected_experiences(plan, bank)
     projects = selected_projects(plan, bank)
     layout = plan.layout
-    prompt_body = f"""\
+    system = f"""\
 {RESUME_WRITER_PROMPT.format(
     min_exp_bullets=layout.min_experience_bullets,
     max_exp_bullets=layout.max_experience_bullets,
@@ -252,7 +212,8 @@ def generate_resume_draft(
 
 JSON schema:
 {_dump(DraftResume.model_json_schema())}
-
+"""
+    user = f"""\
 {_job_header(job)}
 
 ## ApplicationPlan
@@ -267,12 +228,14 @@ JSON schema:
 ## Approved skills (copy as-is; do not invent names)
 {_dump([group.model_dump() for group in plan.skill_groups])}
 """
-    draft = _parse_draft_resume(run_prompt(prompt_body, cursor_writer_model()))
+    draft = generate_structured(
+        system=system, user=user, model=writer_model(), schema=DraftResume
+    )
     if not draft.skills:
         draft = draft.model_copy(update={"skills": list(plan.skill_groups)})
     if not draft.education:
         draft = draft.model_copy(update={"education": list(bank.profile.education)})
-    return draft, len(prompt_body)
+    return draft, len(system) + len(user)
 
 
 def generate_cover_letter_draft(
@@ -294,12 +257,16 @@ def generate_cover_letter_draft(
             ordered.append(lookup[record_id])
     supporting = [item.prompt_payload() for item in ordered]
     example = load_cover_letter_example()
-    prompt_body = f"""\
+    system = f"""\
 {COVER_LETTER_WRITER_PROMPT}
 
 JSON schema:
 {_dump(CoverLetter.model_json_schema())}
 
+## Cover letter example (structure, length, and tone only)
+{example or "(none — use a professional first-person cover letter format)"}
+"""
+    user = f"""\
 {_job_header(job)}
 
 ## Finalized resume
@@ -307,29 +274,29 @@ JSON schema:
 
 ## Supporting experiences/projects
 {_dump(supporting)}
-
-## Cover letter example (structure, length, and tone only)
-{example or "(none — use a professional first-person cover letter format)"}
 """
-    return _parse_cover_letter(run_prompt(prompt_body, cursor_writer_model()))
+    return generate_structured(
+        system=system, user=user, model=writer_model(), schema=CoverLetter
+    )
 
 
-def _review_prompt(
+def _review_messages(
     job: Job,
     plan: ApplicationPlan,
     bank: CareerBank,
     resume: TailoredResume,
     cover: CoverLetter | None,
-) -> str:
+) -> tuple[str, str]:
     experiences = selected_experiences(plan, bank)
     projects = selected_projects(plan, bank)
     cover_block = _dump(cover.model_dump()) if cover is not None else "(cover letter skipped)"
-    return f"""\
+    system = f"""\
 {CHECKER_PROMPT}
 
 JSON schema:
 {_dump(ReviewResult.model_json_schema())}
-
+"""
+    user = f"""\
 {_job_header(job)}
 
 ## ApplicationPlan
@@ -344,6 +311,7 @@ JSON schema:
 ## Draft cover letter
 {cover_block}
 """
+    return system, user
 
 
 def review_materials(
@@ -357,13 +325,13 @@ def review_materials(
 
     Returns (review, escalated, model_used).
     """
-    prompt = _review_prompt(job, plan, bank, resume, cover)
-    checker = cursor_checker_model()
-    review = _parse_review(run_prompt(prompt, checker))
+    system, user = _review_messages(job, plan, bank, resume, cover)
+    checker = checker_model()
+    review = llm_review(system=system, user=user, model=checker, schema=ReviewResult)
     if review.approved and not review.issues:
         return review, False, checker
-    escalation = cursor_escalation_model()
-    review = _parse_review(run_prompt(prompt, escalation))
+    escalation = escalation_model()
+    review = llm_review(system=system, user=user, model=escalation, schema=ReviewResult)
     return review, True, escalation
 
 
@@ -425,17 +393,20 @@ def _write_answers_draft(
     bank: CareerBank,
     extra: str = "",
 ) -> ApplicationAnswersResult:
-    prompt = f"""\
+    system = f"""\
 {ANSWERS_WRITER_PROMPT}
 
 JSON schema:
 {_dump(ApplicationAnswersResult.model_json_schema())}
-
+"""
+    user = f"""\
 {_answers_context(job, plan, bank)}
 {extra}
 Return answers as one JSON object matching the schema.
 """
-    draft = _parse_answers(run_prompt(prompt, cursor_writer_model()))
+    draft = generate_structured(
+        system=system, user=user, model=writer_model(), schema=ApplicationAnswersResult
+    )
     return _align_answers(job, draft)
 
 
@@ -445,23 +416,24 @@ def _review_answers(
     bank: CareerBank,
     draft: ApplicationAnswersResult,
 ) -> tuple[ReviewResult, bool, str]:
-    prompt = f"""\
+    system = f"""\
 {ANSWERS_CHECKER_PROMPT}
 
 JSON schema:
 {_dump(ReviewResult.model_json_schema())}
-
+"""
+    user = f"""\
 {_answers_context(job, plan, bank)}
 
 ## Draft answers to review
 {_dump(draft.model_dump())}
 """
-    checker = cursor_checker_model()
-    review = _parse_review(run_prompt(prompt, checker))
+    checker = checker_model()
+    review = llm_review(system=system, user=user, model=checker, schema=ReviewResult)
     if review.approved and not review.issues:
         return review, False, checker
-    escalation = cursor_escalation_model()
-    review = _parse_review(run_prompt(prompt, escalation))
+    escalation = escalation_model()
+    review = llm_review(system=system, user=user, model=escalation, schema=ReviewResult)
     return review, True, escalation
 
 
@@ -474,30 +446,45 @@ def generate_answers(
         raise ValueError("generate_answers called with no questions on the job.")
 
     draft = _write_answers_draft(job, plan, bank)
-    review, escalated, checker_model = _review_answers(job, plan, bank, draft)
+    review, escalated, used_checker = _review_answers(job, plan, bank, draft)
     revised = False
     length_issues = overlong_answer_issues(draft)
     if not review.approved or length_issues:
-        issues = list(review.issues) if review.issues else []
-        if not review.approved and not issues:
-            issues.append(review.summary or "The answers did not look strong enough.")
-        issues.extend(length_issues)
+        issue_payload = [item.model_dump() for item in review.issues]
+        if not review.approved and not issue_payload:
+            issue_payload.append(
+                {
+                    "location": "answers[0]",
+                    "code": "other",
+                    "message": review.summary or "The answers did not look strong enough.",
+                    "severity": "error",
+                }
+            )
+        for length_issue in length_issues:
+            issue_payload.append(
+                {
+                    "location": "answers",
+                    "code": "other",
+                    "message": length_issue,
+                    "severity": "error",
+                }
+            )
         extra = f"""
 ## Checker / length feedback — revise the answers to address every issue
-{_dump({"summary": review.summary, "issues": issues})}
+{_dump({"summary": review.summary, "issues": issue_payload})}
 
 Respect each question's max_length. Keep every fact grounded in the selected records.
 Return a full replacement JSON object.
 """
         draft = _write_answers_draft(job, plan, bank, extra=extra)
-        review, escalated, checker_model = _review_answers(job, plan, bank, draft)
+        review, escalated, used_checker = _review_answers(job, plan, bank, draft)
         revised = True
 
     return GeneratedAnswers(
         answers=draft,
         review=review,
-        writer_model=cursor_writer_model(),
-        checker_model=checker_model,
+        writer_model=writer_model(),
+        checker_model=used_checker,
         revised=revised,
         escalated=escalated,
     )

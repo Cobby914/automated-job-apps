@@ -6,7 +6,7 @@ import re
 from pathlib import Path
 
 import yaml
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 
 MAX_BULLET_CHARS = 113
 MIN_BULLET_CHARS = 90
@@ -285,10 +285,145 @@ class ApplicationAnswersResult(BaseModel):
     answers: list[ApplicationAnswer]
 
 
+class ReviewIssue(BaseModel):
+    location: str = "resume"
+    code: str = "other"
+    type: str = ""
+    section: str = ""
+    item_id: str = ""
+    bullet_index: int | None = None
+    paragraph_index: int | None = None
+    message: str
+    severity: str = "error"
+
+    @model_validator(mode="before")
+    @classmethod
+    def sync_type_code_and_section(cls, data: object) -> object:
+        if not isinstance(data, dict):
+            return data
+        payload = dict(data)
+        code = str(payload.get("code") or "").strip()
+        kind = str(payload.get("type") or "").strip()
+        if kind and not code:
+            payload["code"] = kind
+            code = kind
+        elif code and not kind:
+            payload["type"] = code
+            kind = code
+        elif not code and not kind:
+            payload["code"] = "other"
+            payload["type"] = "other"
+        section = str(payload.get("section") or "").strip()
+        if not section:
+            inferred = _section_from_location(str(payload.get("location") or ""))
+            if inferred:
+                payload["section"] = inferred
+        return payload
+
+
+class ParsedLocation(BaseModel):
+    kind: str
+    item_index: int = 0
+    part_index: int = 0
+    item_id: str = ""
+
+
+def _section_from_location(location: str) -> str:
+    parsed = parse_issue_location(location)
+    if parsed is None:
+        return ""
+    return parsed.kind
+
+
+def coerce_review_issues(value: object) -> object:
+    if not isinstance(value, list):
+        return value
+    coerced: list[object] = []
+    for item in value:
+        if isinstance(item, str):
+            coerced.append(
+                {
+                    "location": "resume",
+                    "code": "other",
+                    "type": "other",
+                    "section": "resume",
+                    "message": item,
+                    "severity": "error",
+                }
+            )
+        else:
+            coerced.append(item)
+    return coerced
+
+
+def parse_issue_location(location: str) -> ParsedLocation | None:
+    """Parse checker locations like experience[0].bullets[1] or cover_letter.paragraphs[0]."""
+    text = (location or "").strip().casefold().replace(" ", "").replace("_", "")
+    if not text or text in {"resume", "skills", "education", "summary"}:
+        return ParsedLocation(kind="resume")
+    match = re.fullmatch(r"experience\[(\d+)\](?:\.bullets\[(\d+)\])?", text)
+    if match:
+        return ParsedLocation(
+            kind="experience",
+            item_index=int(match.group(1)),
+            part_index=int(match.group(2) or 0),
+        )
+    match = re.fullmatch(r"projects?\[(\d+)\](?:\.bullets\[(\d+)\])?", text)
+    if match:
+        return ParsedLocation(
+            kind="project",
+            item_index=int(match.group(1)),
+            part_index=int(match.group(2) or 0),
+        )
+    match = re.fullmatch(r"coverletter(?:\.paragraphs\[(\d+)\])?", text)
+    if match:
+        return ParsedLocation(
+            kind="cover_letter",
+            part_index=int(match.group(1) or 0),
+        )
+    match = re.fullmatch(r"answers\[(\d+)\]", text)
+    if match:
+        return ParsedLocation(kind="answers", part_index=int(match.group(1)))
+    return None
+
+
+def review_issue_text(review: ReviewResult) -> str:
+    if review.issues:
+        parts = []
+        for item in review.issues:
+            loc = item.location.strip()
+            parts.append(f"{loc}: {item.message}" if loc else item.message)
+        return "; ".join(parts)
+    return review.summary
+
+
+def issue_feedback(issue: ReviewIssue) -> str:
+    """Feedback for a single review issue, used by targeted repair."""
+    if issue.item_id.strip():
+        loc = issue.item_id.strip()
+        if issue.bullet_index is not None:
+            loc = f"{loc} bullet {issue.bullet_index}"
+        elif issue.paragraph_index is not None:
+            loc = f"{loc} paragraph {issue.paragraph_index}"
+    else:
+        loc = issue.location.strip()
+    return f"{loc}: {issue.message}" if loc else issue.message
+
+
 class ReviewResult(BaseModel):
     approved: bool
     summary: str = ""
-    issues: list[str] = Field(default_factory=list)
+    issues: list[ReviewIssue] = Field(default_factory=list)
+
+    @field_validator("issues", mode="before")
+    @classmethod
+    def coerce_issues(cls, value: object) -> object:
+        return coerce_review_issues(value)
+
+
+class RankedSelection(BaseModel):
+    record_id: str
+    score: float
 
 
 class LayoutBudget(BaseModel):
@@ -315,17 +450,24 @@ class ApplicationPlan(BaseModel):
     cover_letter: bool = True
     cover_letter_source_ids: list[str] = Field(default_factory=list)
     resume_priorities: list[str] = Field(default_factory=list)
+    experience_scores: list[RankedSelection] = Field(default_factory=list)
+    project_scores: list[RankedSelection] = Field(default_factory=list)
 
 
 class PipelineMetrics(BaseModel):
     experience_count: int = 0
     project_count: int = 0
+    candidate_experiences: int = 0
+    selected_experiences: int = 0
+    candidate_projects: int = 0
+    selected_projects: int = 0
     context_chars: int = 0
     validation_failures: int = 0
     bullet_rewrites: int = 0
     cover_letter_repairs: int = 0
     page_fit_attempts: int = 0
-    full_rewrites: int = 0
+    generation_attempts: int = 0
+    semantic_review_failures: int = 0
     initial_resume_pages: int | None = None
     final_resume_pages: int | None = None
     initial_cover_pages: int | None = None

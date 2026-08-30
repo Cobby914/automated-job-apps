@@ -87,6 +87,7 @@ AI_PHRASES = (
     "machine learning",
     "deep learning",
     "computer vision",
+    "artificial intelligence",
     "data science",
     "sensor fusion",
     "autonomous driving",
@@ -101,9 +102,13 @@ SWE_PHRASES = (
     "web application",
     "backend engineer",
     "frontend engineer",
+    "distributed systems",
 )
 
 _SCORE_MARGIN = 2
+MIN_ABSOLUTE_SCORE = 4.0
+MIN_SCORE_RATIO = 0.35
+MAX_SKILLS_PER_GROUP = 5
 
 _CATEGORY_ALIASES = {
     "backend & apis": "Backend/Data",
@@ -127,12 +132,19 @@ def job_text(job: Job) -> str:
     return "\n".join(part for part in (job.title, job.description, job.notes) if part)
 
 
+def _keyword_hit(word: str, tokens: set[str], blob: str) -> bool:
+    """Unigrams match tokens only; hyphenated terms may match the raw blob."""
+    if "-" in word or " " in word:
+        return word in blob
+    return word in tokens
+
+
 def score_template(job: Job) -> tuple[str, str, dict[str, int]]:
     """Return (template, reason, raw scores) from keyword overlap."""
     blob = job_text(job).casefold()
     tokens = tokenize(blob)
-    swe = sum(1 for word in SWE_KEYWORDS if word in tokens or word in blob)
-    ai = sum(1 for word in AI_KEYWORDS if word in tokens or word in blob)
+    swe = sum(1 for word in SWE_KEYWORDS if _keyword_hit(word, tokens, blob))
+    ai = sum(1 for word in AI_KEYWORDS if _keyword_hit(word, tokens, blob))
     swe += sum(2 for phrase in SWE_PHRASES if phrase in blob)
     ai += sum(2 for phrase in AI_PHRASES if phrase in blob)
     scores = {"swe": swe, "ai": ai}
@@ -177,17 +189,26 @@ def _record_corpus(record: ExperienceRecord | ProjectRecord) -> str:
     return " ".join(parts)
 
 
+def _tech_hit(tech: str, job_tokens: set[str], blob: str) -> bool:
+    """Match a technology name with tokens/phrases, never bare substrings."""
+    name = tech.strip()
+    if not name:
+        return False
+    tech_tokens = tokenize(name)
+    if not tech_tokens:
+        return False
+    if len(tech_tokens) == 1:
+        return next(iter(tech_tokens)) in job_tokens
+    return name.casefold() in blob or tech_tokens <= job_tokens
+
+
 def score_record(job: Job, record: ExperienceRecord | ProjectRecord, template: str) -> float:
     hay = _record_corpus(record).casefold()
     blob = job_text(job).casefold()
     job_tokens = tokenize(blob)
     record_tokens = tokenize(hay)
     overlap = len(job_tokens & record_tokens)
-    tech_hits = 0
-    for tech in record.technologies:
-        name = tech.casefold()
-        if name and name in blob:
-            tech_hits += 2
+    tech_hits = sum(2 for tech in record.technologies if _tech_hit(tech, job_tokens, blob))
     tag_hits = sum(1 for tag in record.tags if tag.casefold().replace("-", " ") in blob)
     domain_hits = sum(1 for domain in record.domains if domain.casefold().replace("-", " ") in blob)
     track_bonus = 3.0 if template in {track.casefold() for track in record.tracks} else 0.0
@@ -211,6 +232,29 @@ def rank_projects(job: Job, bank: CareerBank, template: str) -> list[RankedItem]
     ]
     ranked.sort(key=lambda item: (-item.score, item.record_id))
     return ranked
+
+
+def select_ranked(
+    ranked: list[RankedItem],
+    *,
+    min_count: int,
+    max_count: int,
+    min_absolute: float = MIN_ABSOLUTE_SCORE,
+    min_ratio: float = MIN_SCORE_RATIO,
+) -> list[RankedItem]:
+    """Keep high-scoring items up to max_count; pad to min_count if needed."""
+    if not ranked:
+        return []
+    floor = max(min_absolute, ranked[0].score * min_ratio)
+    selected = [item for item in ranked if item.score >= floor][:max_count]
+    have = {item.record_id for item in selected}
+    for item in ranked:
+        if len(selected) >= min_count:
+            break
+        if item.record_id not in have:
+            selected.append(item)
+            have.add(item.record_id)
+    return selected[:max_count]
 
 
 def _normalize_skill(name: str) -> str:
@@ -266,14 +310,20 @@ def select_skills(job: Job, skills: SkillsInventory, template: str) -> list[Skil
                     names.append(item)
         if not names:
             continue
-        groups.append(SkillGroup(category=category, items=", ".join(names)))
+        groups.append(
+            SkillGroup(
+                category=category,
+                items=", ".join(names[:MAX_SKILLS_PER_GROUP]),
+            )
+        )
         if len(groups) >= 5:
             break
 
     if len(groups) < 3:
         for group in recommended:
             if all(g.category != group.category for g in groups):
-                groups.append(group)
+                names = split_skill_items(group.items)[:MAX_SKILLS_PER_GROUP]
+                groups.append(SkillGroup(category=group.category, items=", ".join(names)))
             if len(groups) >= 3:
                 break
     return groups[:5]

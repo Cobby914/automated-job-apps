@@ -2,11 +2,15 @@
 
 from __future__ import annotations
 
-from jobapps.career import CareerProfile
+import re
+
+from jobapps.career import CareerBank, CareerProfile, ExperienceRecord, ProjectRecord
 from jobapps.models import (
     ApplicationAnswersResult,
     ApplicationPlan,
     CoverLetter,
+    DraftExperience,
+    DraftProject,
     DraftResume,
     SourcedBullet,
     TailoredResume,
@@ -15,11 +19,17 @@ from jobapps.models import (
     overlong_bullet_issues,
     unknown_skill_issues,
 )
+from jobapps.plan import selected_experiences, selected_projects
 
 MAX_SEMANTIC_REVISIONS = 1
 MAX_BULLET_REPAIRS = 2
 MAX_PAGE_FIT_REPAIRS = 2
 MAX_COVER_LETTER_REPAIRS = 1
+
+_NUMERIC_CLAIM_RE = re.compile(
+    r"(?<![A-Za-z0-9])(\d+(?:\.\d+)?)(?:\s*(%|[Kk]|[Mm](?:illion)?))?(?![A-Za-z])"
+)
+_YEAR_RE = re.compile(r"(?:19|20)\d{2}")
 
 
 def content_bullets(bullets: list[str]) -> list[str]:
@@ -31,6 +41,8 @@ def validate_resume(
     plan: ApplicationPlan,
     allowed_skills: set[str],
     profile: CareerProfile | None = None,
+    *,
+    enforce_layout_mins: bool = True,
 ) -> list[str]:
     issues: list[str] = []
     layout = plan.layout
@@ -49,7 +61,7 @@ def validate_resume(
         issues.append("Resume is missing the Skills section.")
 
     n_exp = len(resume.experience)
-    if n_exp < layout.min_experiences:
+    if enforce_layout_mins and n_exp < layout.min_experiences:
         issues.append(
             f"Resume has {n_exp} experiences; need at least {layout.min_experiences}."
         )
@@ -59,7 +71,7 @@ def validate_resume(
         )
 
     n_proj = len(resume.projects)
-    if n_proj < layout.min_projects:
+    if enforce_layout_mins and n_proj < layout.min_projects:
         issues.append(
             f"Resume has {n_proj} projects; need at least {layout.min_projects}."
         )
@@ -72,7 +84,7 @@ def validate_resume(
         if not item.company.strip() or not item.role.strip():
             issues.append("Experience is missing company or role.")
         count = len(content_bullets(item.bullets))
-        if count < layout.min_experience_bullets:
+        if enforce_layout_mins and count < layout.min_experience_bullets:
             issues.append(
                 f"Experience {item.company} / {item.role} has {count} bullets; "
                 f"need at least {layout.min_experience_bullets}."
@@ -89,7 +101,7 @@ def validate_resume(
         if not any(is_stack_bullet(bullet) for bullet in item.bullets):
             issues.append(f"Project {item.name} is missing a trailing Stack: line.")
         count = len(content_bullets(item.bullets))
-        if count < layout.project_bullets:
+        if enforce_layout_mins and count < layout.project_bullets:
             issues.append(
                 f"Project {item.name} has {count} content bullets; "
                 f"need {layout.project_bullets}."
@@ -101,7 +113,7 @@ def validate_resume(
             )
 
     n_skills = len(resume.skills)
-    if n_skills < layout.min_skill_groups:
+    if enforce_layout_mins and n_skills < layout.min_skill_groups:
         issues.append(
             f"Skills section has {n_skills} groups; need at least {layout.min_skill_groups}."
         )
@@ -126,13 +138,150 @@ def validate_resume(
     return issues
 
 
+def _experience_record(
+    item: DraftExperience, plan: ApplicationPlan, bank: CareerBank
+) -> ExperienceRecord | None:
+    for record in selected_experiences(plan, bank):
+        if record.company == item.company and record.role == item.role:
+            return record
+    for record in selected_experiences(plan, bank):
+        if record.company == item.company:
+            return record
+    return None
+
+
+def _project_record(
+    item: DraftProject, plan: ApplicationPlan, bank: CareerBank
+) -> ProjectRecord | None:
+    for record in selected_projects(plan, bank):
+        if record.name == item.name:
+            return record
+    return None
+
+
+def canonical_number(raw: str) -> str:
+    if "." in raw:
+        return format(float(raw), "g")
+    return str(int(raw))
+
+
+def numeric_claim_tokens(text: str) -> list[str]:
+    """Extract normalized numeric claims, skipping years."""
+    tokens: list[str] = []
+    for match in _NUMERIC_CLAIM_RE.finditer(text or ""):
+        number = match.group(1)
+        if _YEAR_RE.fullmatch(number):
+            continue
+        tokens.append(canonical_number(number))
+    return tokens
+
+
+def _metric_provenance_issues(
+    bullet: SourcedBullet,
+    record: ExperienceRecord | ProjectRecord,
+    label: str,
+    index: int,
+) -> list[str]:
+    claims = numeric_claim_tokens(bullet.text)
+    if not claims:
+        return []
+    cited_ids = set(bullet.sources)
+    cited_metrics = [item for item in record.metrics if item.id in cited_ids]
+    if not cited_metrics:
+        return [
+            f"{label} bullet {index + 1} has numeric claims but cites no metric sources."
+        ]
+    metric_nums = set()
+    for item in cited_metrics:
+        metric_nums.update(numeric_claim_tokens(item.text))
+    missing = [claim for claim in claims if claim not in metric_nums]
+    if not missing:
+        return []
+    return [
+        f"{label} bullet {index + 1} numeric claims "
+        + ", ".join(missing)
+        + " are not supported by cited metrics."
+    ]
+
+
+def validate_sources(
+    draft: DraftResume,
+    plan: ApplicationPlan,
+    bank: CareerBank,
+) -> list[str]:
+    issues: list[str] = []
+    for item in draft.experience:
+        record = _experience_record(item, plan, bank)
+        label = f"Experience {item.company} / {item.role}"
+        if record is None:
+            issues.append(f"{label} is not in the selected career records.")
+            continue
+        allowed = record.fact_metric_ids()
+        for index, bullet in enumerate(item.bullets):
+            if is_stack_bullet(bullet.text):
+                continue
+            if not bullet.sources:
+                issues.append(f"{label} bullet {index + 1} is missing sources.")
+                continue
+            unknown = [sid for sid in bullet.sources if sid not in allowed]
+            if unknown:
+                issues.append(
+                    f"{label} bullet {index + 1} cites unknown sources: "
+                    + ", ".join(unknown)
+                )
+                continue
+            issues.extend(_metric_provenance_issues(bullet, record, label, index))
+    for item in draft.projects:
+        record = _project_record(item, plan, bank)
+        if record is None:
+            issues.append(f"Project {item.name} is not in the selected career records.")
+            continue
+        allowed = record.fact_metric_ids()
+        label = f"Project {item.name}"
+        for index, bullet in enumerate(item.bullets):
+            if is_stack_bullet(bullet.text):
+                continue
+            if not bullet.sources:
+                issues.append(f"{label} bullet {index + 1} is missing sources.")
+                continue
+            unknown = [sid for sid in bullet.sources if sid not in allowed]
+            if unknown:
+                issues.append(
+                    f"{label} bullet {index + 1} cites unknown sources: "
+                    + ", ".join(unknown)
+                )
+                continue
+            issues.extend(_metric_provenance_issues(bullet, record, label, index))
+    return issues
+
+
+def source_issues(
+    draft: DraftResume,
+    plan: ApplicationPlan,
+    bank: CareerBank,
+) -> list[str]:
+    return validate_sources(draft, plan, bank)
+
+
 def validate_draft_resume(
     draft: DraftResume,
     plan: ApplicationPlan,
     allowed_skills: set[str],
     profile: CareerProfile | None = None,
+    bank: CareerBank | None = None,
+    *,
+    enforce_layout_mins: bool = True,
 ) -> list[str]:
-    return validate_resume(draft.to_tailored(), plan, allowed_skills, profile)
+    issues = validate_resume(
+        draft.to_tailored(),
+        plan,
+        allowed_skills,
+        profile,
+        enforce_layout_mins=enforce_layout_mins,
+    )
+    if bank is not None:
+        issues.extend(validate_sources(draft, plan, bank))
+    return issues
 
 
 def validate_cover_letter(cover: CoverLetter) -> list[str]:

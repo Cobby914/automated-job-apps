@@ -6,6 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 from unittest.mock import MagicMock, patch
+import json
 import sys
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
@@ -32,6 +33,7 @@ from jobapps.models import (
     GenerationResult,
     Job,
     Project,
+    ReviewIssue,
     ReviewResult,
     TemplateChoice,
     resolve_template_request,
@@ -72,7 +74,11 @@ class GenerateTests(unittest.TestCase):
             extract_json('{"approved": false, "summary": "Too generic", "issues": ["Cliches"]}')
         )
         self.assertFalse(review.approved)
-        self.assertEqual(review.issues, ["Cliches"])
+        self.assertEqual(review.issues[0].message, "Cliches")
+        self.assertEqual(review.issues[0].location, "resume")
+        self.assertEqual(review.issues[0].code, "other")
+        self.assertEqual(review.issues[0].type, "other")
+        self.assertEqual(review.issues[0].section, "resume")
 
     def test_template_choice_parses(self) -> None:
         choice = TemplateChoice.model_validate_json(
@@ -825,6 +831,67 @@ class RankingAndPlanTests(unittest.TestCase):
         self.assertEqual(plan.template, "swe")
         self.assertTrue(plan.cover_letter)
 
+    def test_html_details_do_not_inflate_ai_score(self) -> None:
+        from jobapps.ranking import score_template
+
+        job = Job(
+            company="Acme",
+            title="Intern",
+            description="See the details in the email about our html docs.",
+        )
+        template, _reason, scores = score_template(job)
+        self.assertEqual(template, "default")
+        self.assertEqual(scores["ai"], 0)
+
+    def test_select_ranked_drops_low_scores_then_pads_to_min(self) -> None:
+        from jobapps.ranking import RankedItem, select_ranked
+
+        ranked = [
+            RankedItem("a", 20.0, "experience"),
+            RankedItem("b", 18.0, "experience"),
+            RankedItem("c", 5.0, "experience"),
+            RankedItem("d", 1.0, "experience"),
+        ]
+        selected = select_ranked(ranked, min_count=3, max_count=4)
+        ids = [item.record_id for item in selected]
+        self.assertEqual(ids, ["a", "b", "c"])
+        self.assertNotIn("d", ids)
+
+    def test_tech_match_does_not_use_substrings(self) -> None:
+        from jobapps.career import ExperienceRecord
+        from jobapps.ranking import score_record
+
+        record = ExperienceRecord(
+            id="c-only",
+            company="XCorp",
+            role="Builder",
+            technologies=["C"],
+        )
+        react_job = Job(
+            company="Acme",
+            title="Frontend",
+            description="React frontend work on the web product.",
+        )
+        self.assertEqual(score_record(react_job, record, "swe"), 0.0)
+        c_job = Job(
+            company="Acme",
+            title="Systems Intern",
+            description="C systems programming on Linux.",
+        )
+        self.assertGreater(score_record(c_job, record, "swe"), 0.0)
+
+    def test_artificial_intelligence_phrase_scores_ai(self) -> None:
+        from jobapps.ranking import score_template
+
+        job = Job(
+            company="Acme",
+            title="Intern",
+            description="We apply artificial intelligence to distributed systems.",
+        )
+        template, _reason, scores = score_template(job)
+        self.assertGreaterEqual(scores["ai"], 2)
+        self.assertGreaterEqual(scores["swe"], 2)
+
     def test_skill_selection_never_invents(self) -> None:
         from jobapps.models import Education as Edu
         from jobapps.models import split_skill_items, unknown_skill_issues
@@ -846,6 +913,26 @@ class RankingAndPlanTests(unittest.TestCase):
         names = [item for group in groups for item in split_skill_items(group.items)]
         self.assertNotIn("Kubernetes", names)
         self.assertTrue(any("PyTorch" in group.items for group in groups))
+        for group in groups:
+            self.assertLessEqual(len(split_skill_items(group.items)), 5)
+
+    def test_skill_selection_puts_jd_matches_first_and_caps_group(self) -> None:
+        from jobapps.models import split_skill_items
+        from jobapps.ranking import MAX_SKILLS_PER_GROUP, select_skills
+
+        job = Job(
+            company="Acme",
+            title="Backend Engineer",
+            description="Python PostgreSQL AWS Docker required.",
+        )
+        groups = select_skills(job, self.bank.skills, "swe")
+        by_category = {group.category: split_skill_items(group.items) for group in groups}
+        self.assertLessEqual(len(by_category["Languages"]), MAX_SKILLS_PER_GROUP)
+        self.assertEqual(by_category["Languages"][0], "Python")
+        self.assertEqual(by_category["Backend/Data"][0], "PostgreSQL")
+        tools = by_category["Systems/Tools"]
+        self.assertIn("AWS", tools[:2])
+        self.assertIn("Docker", tools[:2])
 
 
 class ValidateAndFitTests(unittest.TestCase):
@@ -1032,9 +1119,11 @@ class CheckerEscalationTests(unittest.TestCase):
             education=bank.profile.education,
             skills=plan.skill_groups,
         )
-        with patch("jobapps.generate.cursor_checker_model", return_value="claude-4.5-sonnet"):
-            with patch("jobapps.generate.run_prompt") as mock_run:
-                mock_run.return_value = '{"approved": true, "summary": "Looks strong.", "issues": []}'
+        with patch("jobapps.generate.checker_model", return_value="claude-4.5-sonnet"):
+            with patch("jobapps.generate.llm_review") as mock_run:
+                mock_run.return_value = ReviewResult(
+                    approved=True, summary="Looks strong.", issues=[]
+                )
                 review, escalated, model = review_materials(job, plan, bank, resume, None)
         self.assertTrue(review.approved)
         self.assertFalse(escalated)
@@ -1065,12 +1154,20 @@ class CheckerEscalationTests(unittest.TestCase):
             education=bank.profile.education,
             skills=plan.skill_groups,
         )
-        with patch("jobapps.generate.cursor_checker_model", return_value="claude-4.5-sonnet"):
-            with patch("jobapps.generate.cursor_escalation_model", return_value="claude-opus-5"):
-                with patch("jobapps.generate.run_prompt") as mock_run:
+        with patch("jobapps.generate.checker_model", return_value="claude-4.5-sonnet"):
+            with patch("jobapps.generate.escalation_model", return_value="claude-opus-5"):
+                with patch("jobapps.generate.llm_review") as mock_run:
                     mock_run.side_effect = [
-                        '{"approved": false, "summary": "Too generic.", "issues": ["Cliches"]}',
-                        '{"approved": true, "summary": "Acceptable after scrutiny.", "issues": []}',
+                        ReviewResult(
+                            approved=False,
+                            summary="Too generic.",
+                            issues=[ReviewIssue(message="Cliches")],
+                        ),
+                        ReviewResult(
+                            approved=True,
+                            summary="Acceptable after scrutiny.",
+                            issues=[],
+                        ),
                     ]
                     review, escalated, model = review_materials(job, plan, bank, resume, None)
         self.assertTrue(review.approved)
@@ -1079,5 +1176,685 @@ class CheckerEscalationTests(unittest.TestCase):
         self.assertEqual(model, "claude-opus-5")
 
 
+class SourceValidationTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from jobapps.career import load_career_bank
+
+        self.bank = load_career_bank(ROOT / "career")
+
+    def test_canonical_bullets_cite_fact_or_metric_ids(self) -> None:
+        for record in [*self.bank.experiences, *self.bank.projects]:
+            known = record.fact_metric_ids()
+            for bullet in record.bullets:
+                if bullet.text.strip().lower().startswith("stack:"):
+                    continue
+                self.assertTrue(bullet.sources, bullet.id)
+                for source_id in bullet.sources:
+                    self.assertIn(source_id, known, f"{bullet.id} -> {source_id}")
+
+    def test_load_rejects_unknown_canonical_source(self) -> None:
+        from jobapps.career import CanonicalBullet, _validate_canonical_sources
+
+        broken = self.bank.model_copy(
+            update={
+                "experiences": [
+                    self.bank.experiences[0].model_copy(
+                        update={
+                            "bullets": [
+                                CanonicalBullet(
+                                    id="bad.bullet.1",
+                                    text="Invented claim with no grounding.",
+                                    sources=["missing.metric.9"],
+                                )
+                            ]
+                        }
+                    )
+                ]
+            }
+        )
+        with self.assertRaises(ValueError) as ctx:
+            _validate_canonical_sources(broken)
+        self.assertIn("unknown source", str(ctx.exception))
+
+    def test_draft_rejects_empty_and_unknown_sources(self) -> None:
+        from jobapps.models import DraftExperience, SourcedBullet
+        from jobapps.plan import build_application_plan, selected_experiences, selected_projects
+        from jobapps.validate import validate_draft_resume
+
+        job = Job(
+            company="Stripe",
+            title="Backend Engineer",
+            description="Python TypeScript PostgreSQL REST APIs Node.js.",
+        )
+        plan = build_application_plan(job, self.bank)
+        experiences = selected_experiences(plan, self.bank)
+        projects = selected_projects(plan, self.bank)
+        from jobapps.models import DraftProject, DraftResume
+
+        draft = DraftResume(
+            experience=[
+                DraftExperience(
+                    company=item.company,
+                    role=item.role,
+                    bullets=[
+                        SourcedBullet(text="A" * 100, sources=[item.facts[0].id]),
+                        SourcedBullet(text="B" * 100, sources=[item.facts[min(1, len(item.facts) - 1)].id]),
+                    ],
+                )
+                for item in experiences
+            ],
+            projects=[
+                DraftProject(
+                    name=item.name,
+                    bullets=[
+                        SourcedBullet(text="P" * 100, sources=[item.facts[0].id]),
+                        SourcedBullet(text="Q" * 100, sources=[item.facts[min(1, len(item.facts) - 1)].id]),
+                        SourcedBullet(text=f"Stack: {item.stack}", sources=[]),
+                    ],
+                )
+                for item in projects
+            ],
+            education=list(self.bank.profile.education),
+            skills=plan.skill_groups,
+        )
+        issues = validate_draft_resume(
+            draft, plan, self.bank.skills.allowed_names(), self.bank.profile, self.bank
+        )
+        source_issues = [item for item in issues if "source" in item.casefold()]
+        self.assertEqual(source_issues, [])
+
+        first = experiences[0]
+        bad = draft.model_copy(
+            update={
+                "experience": [
+                    DraftExperience(
+                        company=first.company,
+                        role=first.role,
+                        bullets=[
+                            SourcedBullet(text="A" * 100, sources=[]),
+                            SourcedBullet(text="B" * 100, sources=["not-a-real-id"]),
+                        ],
+                    ),
+                    *draft.experience[1:],
+                ]
+            }
+        )
+        issues = validate_draft_resume(
+            bad, plan, self.bank.skills.allowed_names(), self.bank.profile, self.bank
+        )
+        self.assertTrue(any("missing sources" in item for item in issues))
+        self.assertTrue(any("unknown sources" in item for item in issues))
+
+    def test_validate_sources_rejects_unsupported_metric_number(self) -> None:
+        from jobapps.models import DraftExperience, DraftResume, SourcedBullet
+        from jobapps.plan import build_application_plan
+        from jobapps.validate import validate_sources
+
+        job = Job(
+            company="Stripe",
+            title="Backend Engineer",
+            description="Python TypeScript PostgreSQL REST APIs Node.js.",
+        )
+        plan = build_application_plan(job, self.bank)
+        plan = plan.model_copy(update={"experience_ids": ["mk-lending"]})
+        lending = self.bank.experience_by_id()["mk-lending"]
+        invented = DraftResume(
+            experience=[
+                DraftExperience(
+                    company=lending.company,
+                    role=lending.role,
+                    bullets=[
+                        SourcedBullet(
+                            text="Improved accuracy by 93% using TypeScript APIs.",
+                            sources=["made-up-source"],
+                        ),
+                        SourcedBullet(text="B" * 100, sources=[lending.facts[0].id]),
+                    ],
+                )
+            ]
+        )
+        issues = validate_sources(invented, plan, self.bank)
+        self.assertTrue(any("unknown sources" in item for item in issues))
+
+        fact_only = DraftResume(
+            experience=[
+                DraftExperience(
+                    company=lending.company,
+                    role=lending.role,
+                    bullets=[
+                        SourcedBullet(
+                            text="Improved accuracy by 93% using TypeScript APIs.",
+                            sources=[lending.facts[0].id],
+                        ),
+                        SourcedBullet(text="B" * 100, sources=[lending.facts[0].id]),
+                    ],
+                )
+            ]
+        )
+        issues = validate_sources(fact_only, plan, self.bank)
+        self.assertTrue(any("numeric claims" in item for item in issues))
+        self.assertTrue(any("93" in item or "metric" in item.casefold() for item in issues))
+
+    def test_stack_lines_may_have_empty_sources(self) -> None:
+        from jobapps.models import DraftExperience, DraftProject, DraftResume, SourcedBullet
+        from jobapps.plan import build_application_plan, selected_experiences, selected_projects
+        from jobapps.validate import source_issues
+
+        job = Job(
+            company="Stripe",
+            title="Backend Engineer",
+            description="Python TypeScript PostgreSQL REST APIs Node.js.",
+        )
+        plan = build_application_plan(job, self.bank)
+        draft = DraftResume(
+            experience=[
+                DraftExperience(
+                    company=item.company,
+                    role=item.role,
+                    bullets=[
+                        SourcedBullet(text="A" * 100, sources=[item.facts[0].id]),
+                        SourcedBullet(text="B" * 100, sources=[item.facts[0].id]),
+                    ],
+                )
+                for item in selected_experiences(plan, self.bank)
+            ],
+            projects=[
+                DraftProject(
+                    name=item.name,
+                    bullets=[
+                        SourcedBullet(text="P" * 100, sources=[item.facts[0].id]),
+                        SourcedBullet(text="Q" * 100, sources=[item.facts[0].id]),
+                        SourcedBullet(text=f"Stack: {item.stack}", sources=[]),
+                    ],
+                )
+                for item in selected_projects(plan, self.bank)
+            ],
+            education=list(self.bank.profile.education),
+            skills=plan.skill_groups,
+        )
+        self.assertEqual(source_issues(draft, plan, self.bank), [])
+
+
+class ReviewLocationTests(unittest.TestCase):
+    def test_parse_issue_location(self) -> None:
+        from jobapps.models import parse_issue_location
+
+        loc = parse_issue_location("experience[0].bullets[1]")
+        self.assertIsNotNone(loc)
+        self.assertEqual(loc.kind, "experience")
+        self.assertEqual(loc.item_index, 0)
+        self.assertEqual(loc.part_index, 1)
+        cover = parse_issue_location("cover_letter.paragraphs[2]")
+        self.assertIsNotNone(cover)
+        self.assertEqual(cover.kind, "cover_letter")
+        self.assertEqual(cover.part_index, 2)
+
+    def test_repair_targets_located_bullet(self) -> None:
+        from jobapps.career import load_career_bank
+        from jobapps.models import (
+            DraftExperience,
+            DraftProject,
+            DraftResume,
+            ReviewIssue,
+            SourcedBullet,
+        )
+        from jobapps.pipeline import _repair_from_review
+        from jobapps.plan import build_application_plan
+
+        bank = load_career_bank(ROOT / "career")
+        job = Job(
+            company="Stripe",
+            title="Backend Engineer",
+            description="Python TypeScript PostgreSQL REST APIs Node.js.",
+        )
+        plan = build_application_plan(job, bank)
+        original = "B" * 100
+        draft = DraftResume(
+            experience=[
+                DraftExperience(
+                    company="M.K Lending",
+                    role="Software Engineer Intern",
+                    bullets=[
+                        SourcedBullet(text="A" * 100, sources=["mk-lending.fact.2"]),
+                        SourcedBullet(text=original, sources=["mk-lending.fact.3"]),
+                    ],
+                )
+            ],
+            projects=[
+                DraftProject(
+                    name="Canvas-Notion",
+                    bullets=[
+                        SourcedBullet(text="P" * 100, sources=["canvas-notion.fact.1"]),
+                        SourcedBullet(text="Q" * 100, sources=["canvas-notion.fact.4"]),
+                    ],
+                )
+            ],
+            education=list(bank.profile.education),
+            skills=plan.skill_groups,
+        )
+        review = ReviewResult(
+            approved=False,
+            summary="Second bullet is generic.",
+            issues=[
+                ReviewIssue(
+                    location="experience[0].bullets[1]",
+                    code="generic",
+                    message="Second bullet is generic.",
+                )
+            ],
+        )
+        rewritten = "Rewritten grounded bullet with TypeScript impact."
+        with patch("jobapps.pipeline.rewrite_bullet", return_value=rewritten):
+            updated, _cover, count, cover_n = _repair_from_review(
+                draft, None, review, plan, bank
+            )
+        self.assertEqual(count, 1)
+        self.assertEqual(cover_n, 0)
+        self.assertEqual(updated.experience[0].bullets[0].text, "A" * 100)
+        self.assertEqual(updated.experience[0].bullets[1].text, rewritten)
+
+    def test_repair_targets_item_id(self) -> None:
+        from jobapps.career import load_career_bank
+        from jobapps.models import DraftExperience, DraftProject, DraftResume, SourcedBullet
+        from jobapps.pipeline import _repair_from_review
+        from jobapps.plan import build_application_plan
+
+        bank = load_career_bank(ROOT / "career")
+        job = Job(
+            company="Stripe",
+            title="Backend Engineer",
+            description="Python TypeScript PostgreSQL REST APIs Node.js.",
+        )
+        plan = build_application_plan(job, bank)
+        lending = bank.experience_by_id()["mk-lending"]
+        other = next(item for item in bank.experiences if item.id != "mk-lending")
+        original = "B" * 100
+        draft = DraftResume(
+            experience=[
+                DraftExperience(
+                    company=other.company,
+                    role=other.role,
+                    bullets=[
+                        SourcedBullet(text="Z" * 100, sources=[other.facts[0].id]),
+                        SourcedBullet(text="Y" * 100, sources=[other.facts[0].id]),
+                    ],
+                ),
+                DraftExperience(
+                    company=lending.company,
+                    role=lending.role,
+                    bullets=[
+                        SourcedBullet(text="A" * 100, sources=["mk-lending.fact.2"]),
+                        SourcedBullet(text=original, sources=["mk-lending.fact.3"]),
+                    ],
+                ),
+            ],
+            projects=[
+                DraftProject(
+                    name="Canvas-Notion",
+                    bullets=[
+                        SourcedBullet(text="P" * 100, sources=["canvas-notion.fact.1"]),
+                        SourcedBullet(text="Q" * 100, sources=["canvas-notion.fact.4"]),
+                    ],
+                )
+            ],
+            education=list(bank.profile.education),
+            skills=plan.skill_groups,
+        )
+        review = ReviewResult(
+            approved=False,
+            summary="Second lending bullet is generic.",
+            issues=[
+                ReviewIssue(
+                    type="generic",
+                    section="experience",
+                    item_id="mk-lending",
+                    bullet_index=1,
+                    message="Second bullet is generic.",
+                )
+            ],
+        )
+        rewritten = "Rewritten grounded bullet with TypeScript impact."
+        with patch("jobapps.pipeline.rewrite_bullet", return_value=rewritten):
+            updated, _cover, count, cover_n = _repair_from_review(
+                draft, None, review, plan, bank
+            )
+        self.assertEqual(count, 1)
+        self.assertEqual(cover_n, 0)
+        self.assertEqual(updated.experience[0].bullets[1].text, "Y" * 100)
+        self.assertEqual(updated.experience[1].bullets[1].text, rewritten)
+
+
+class DedupAndResumeTests(unittest.TestCase):
+    def test_fingerprint_prefers_portal_url(self) -> None:
+        from jobapps.dedup import job_fingerprint
+
+        left = Job(
+            company="Acme Inc",
+            title="SWE",
+            portal_url="https://example.com/jobs/1/",
+            description="One",
+        )
+        right = Job(
+            company="Other",
+            title="Intern",
+            portal_url="https://example.com/jobs/1",
+            description="Two",
+        )
+        self.assertEqual(job_fingerprint(left), job_fingerprint(right))
+
+    def test_fingerprint_uses_description_when_no_url(self) -> None:
+        from jobapps.dedup import job_fingerprint
+
+        left = Job(company="Acme", title="SWE", description="Same posting text")
+        right = Job(company="Acme", title="SWE", description="Different posting")
+        self.assertNotEqual(job_fingerprint(left), job_fingerprint(right))
+
+    def test_find_duplicate_in_processed(self) -> None:
+        from jobapps.dedup import find_duplicate
+
+        job = Job(company="Acme", title="SWE", description="Build APIs.")
+        with TemporaryDirectory() as tmp:
+            processed = Path(tmp) / "processed"
+            processed.mkdir()
+            (processed / "acme.yaml").write_text(
+                "company: Acme\ntitle: SWE\ndescription: Build APIs.\n",
+                encoding="utf-8",
+            )
+            with patch("jobapps.dedup.PROCESSED_DIR", processed):
+                with patch("jobapps.dedup.OUTPUT_DIR", Path(tmp) / "output"):
+                    found = find_duplicate(job)
+            self.assertIsNotNone(found)
+            self.assertEqual(found.name, "acme.yaml")
+
+    def test_merge_fitted_preserves_matching_sources(self) -> None:
+        from jobapps.models import DraftExperience, DraftResume, SourcedBullet
+        from jobapps.pipeline import merge_fitted_into_draft
+
+        draft = DraftResume(
+            experience=[
+                DraftExperience(
+                    company="Acme",
+                    role="Intern",
+                    bullets=[
+                        SourcedBullet(text="kept", sources=["fact.1"]),
+                        SourcedBullet(text="old", sources=["fact.2"]),
+                    ],
+                )
+            ]
+        )
+        fitted = TailoredResume(
+            experience=[
+                Experience(company="Acme", role="Intern", bullets=["kept", "shortened"])
+            ],
+            education=[Education(school="UCI", degree="BS")],
+        )
+        merged = merge_fitted_into_draft(draft, fitted)
+        self.assertEqual(merged.experience[0].bullets[0].sources, ["fact.1"])
+        self.assertEqual(merged.experience[0].bullets[1].text, "shortened")
+        self.assertEqual(merged.experience[0].bullets[1].sources, ["fact.2"])
+
+    def test_process_resumes_from_reviewed_stage(self) -> None:
+        from jobapps.career import load_career_bank
+        from jobapps.models import DraftExperience, DraftProject, DraftResume, SourcedBullet
+        from jobapps.pipeline import process_job_file
+        from jobapps.plan import build_application_plan
+
+        bank = load_career_bank(ROOT / "career")
+        job = Job(
+            company="Stripe",
+            title="Backend Engineer",
+            description="Python TypeScript PostgreSQL REST APIs Node.js.",
+            cover_letter=False,
+        )
+        plan = build_application_plan(job, bank)
+        draft = DraftResume(
+            experience=[
+                DraftExperience(
+                    company=item.company,
+                    role=item.role,
+                    bullets=[
+                        SourcedBullet(
+                            text=f"{item.id}-a".ljust(100, "x"),
+                            sources=[item.facts[0].id],
+                        ),
+                        SourcedBullet(
+                            text=f"{item.id}-b".ljust(100, "y"),
+                            sources=[item.facts[0].id],
+                        ),
+                    ],
+                )
+                for item in [bank.experience_by_id()[rid] for rid in plan.experience_ids]
+            ],
+            projects=[
+                DraftProject(
+                    name=item.name,
+                    bullets=[
+                        SourcedBullet(
+                            text=f"{item.id}-p".ljust(100, "p"),
+                            sources=[item.facts[0].id],
+                        ),
+                        SourcedBullet(
+                            text=f"{item.id}-q".ljust(100, "q"),
+                            sources=[item.facts[0].id],
+                        ),
+                        SourcedBullet(text=f"Stack: {item.stack}", sources=[]),
+                    ],
+                )
+                for item in [bank.project_by_id()[rid] for rid in plan.project_ids]
+            ],
+            education=list(bank.profile.education),
+            skills=plan.skill_groups,
+        )
+        review = ReviewResult(approved=True, summary="Looks good.", issues=[])
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            job_path = root / "stripe.yaml"
+            job_path.write_text(
+                "company: Stripe\ntitle: Backend Engineer\n"
+                "description: Python TypeScript PostgreSQL REST APIs Node.js.\n"
+                "cover_letter: false\n",
+                encoding="utf-8",
+            )
+            destination = root / "output" / "stripe"
+            meta = destination / "meta"
+            inputs = destination / "inputs"
+            materials = destination / "materials"
+            for path in (meta, inputs, materials):
+                path.mkdir(parents=True)
+            (inputs / "job.yaml").write_text(job_path.read_text(encoding="utf-8"), encoding="utf-8")
+            (meta / "application_plan.json").write_text(
+                plan.model_dump_json(indent=2) + "\n", encoding="utf-8"
+            )
+            (meta / "resume_draft.json").write_text(
+                draft.model_dump_json(indent=2) + "\n", encoding="utf-8"
+            )
+            (meta / "review.json").write_text(
+                review.model_dump_json(indent=2) + "\n", encoding="utf-8"
+            )
+            (root / "stripe.yaml.progress.json").write_text(
+                json.dumps(
+                    {
+                        "output_dir": str(destination),
+                        "stage": "reviewed",
+                        "template_request": "auto",
+                        "graduation_year": "June 2027",
+                        "checker_model": "claude-4.5-sonnet",
+                        "escalated": False,
+                        "metrics": {},
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            def fake_fit(_job, _contact, resume, cover, _materials_dir, _plan, _bank, metrics):
+                metrics.final_resume_pages = 1
+                return resume, cover
+
+            with patch("jobapps.pipeline.find_duplicate", return_value=None):
+                with patch("jobapps.pipeline.generate_resume_draft") as mock_draft:
+                    with patch("jobapps.pipeline.review_materials") as mock_review:
+                        with patch("jobapps.pipeline._render_and_fit", side_effect=fake_fit):
+                            with patch(
+                                "jobapps.pipeline.create_application_page",
+                                return_value=None,
+                            ):
+                                result = process_job_file(job_path)
+            mock_draft.assert_not_called()
+            mock_review.assert_not_called()
+            self.assertTrue((destination / "meta" / "resume_final.json").is_file())
+            self.assertTrue((destination / "meta" / "meta.yaml").is_file())
+            self.assertTrue(result.checker_approved)
+
+    def test_process_validates_after_semantic_repair(self) -> None:
+        from jobapps.career import load_career_bank
+        from jobapps.models import DraftExperience, DraftProject, DraftResume, SourcedBullet
+        from jobapps.pipeline import process_job_file
+        from jobapps.plan import build_application_plan
+        from jobapps.validate import validate_draft_resume
+
+        bank = load_career_bank(ROOT / "career")
+        job = Job(
+            company="Stripe",
+            title="Backend Engineer",
+            description="Python TypeScript PostgreSQL REST APIs Node.js.",
+            cover_letter=False,
+        )
+        plan = build_application_plan(job, bank)
+        draft = DraftResume(
+            experience=[
+                DraftExperience(
+                    company=item.company,
+                    role=item.role,
+                    bullets=[
+                        SourcedBullet(
+                            text=f"{item.id}-a".ljust(100, "x"),
+                            sources=[item.facts[0].id],
+                        ),
+                        SourcedBullet(
+                            text=f"{item.id}-b".ljust(100, "y"),
+                            sources=[item.facts[0].id],
+                        ),
+                    ],
+                )
+                for item in [bank.experience_by_id()[rid] for rid in plan.experience_ids]
+            ],
+            projects=[
+                DraftProject(
+                    name=item.name,
+                    bullets=[
+                        SourcedBullet(
+                            text=f"{item.id}-p".ljust(100, "p"),
+                            sources=[item.facts[0].id],
+                        ),
+                        SourcedBullet(
+                            text=f"{item.id}-q".ljust(100, "q"),
+                            sources=[item.facts[0].id],
+                        ),
+                        SourcedBullet(text=f"Stack: {item.stack}", sources=[]),
+                    ],
+                )
+                for item in [bank.project_by_id()[rid] for rid in plan.project_ids]
+            ],
+            education=list(bank.profile.education),
+            skills=plan.skill_groups,
+        )
+        first_id = plan.experience_ids[0]
+        failed = ReviewResult(
+            approved=False,
+            summary="Second bullet is generic.",
+            issues=[
+                ReviewIssue(
+                    type="generic",
+                    section="experience",
+                    item_id=first_id,
+                    bullet_index=1,
+                    message="Second bullet is generic.",
+                )
+            ],
+        )
+        passed = ReviewResult(approved=True, summary="Looks good.", issues=[])
+        rewritten = "Rewritten grounded TypeScript API work with real impact now."
+
+        def fake_fit(_job, _contact, resume, cover, _materials_dir, _plan, _bank, metrics):
+            metrics.final_resume_pages = 1
+            return resume, cover
+
+        with TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            job_path = root / "stripe.yaml"
+            job_path.write_text(
+                "company: Stripe\ntitle: Backend Engineer\n"
+                "description: Python TypeScript PostgreSQL REST APIs Node.js.\n"
+                "cover_letter: false\n",
+                encoding="utf-8",
+            )
+            with patch("jobapps.pipeline.OUTPUT_DIR", root / "output"):
+                with patch("jobapps.pipeline.find_duplicate", return_value=None):
+                    with patch(
+                        "jobapps.pipeline.generate_resume_draft",
+                        return_value=(draft, 120),
+                    ):
+                        with patch(
+                            "jobapps.pipeline.review_materials",
+                            side_effect=[
+                                (failed, False, "claude-4.5-sonnet"),
+                                (passed, False, "claude-4.5-sonnet"),
+                            ],
+                        ) as mock_review:
+                            with patch(
+                                "jobapps.pipeline.rewrite_bullet",
+                                return_value=rewritten,
+                            ):
+                                with patch(
+                                    "jobapps.pipeline.validate_draft_resume",
+                                    wraps=validate_draft_resume,
+                                ) as mock_validate:
+                                    with patch(
+                                        "jobapps.pipeline._render_and_fit",
+                                        side_effect=fake_fit,
+                                    ):
+                                        with patch(
+                                            "jobapps.pipeline.create_application_page",
+                                            return_value=None,
+                                        ):
+                                            result = process_job_file(job_path)
+        self.assertEqual(mock_review.call_count, 2)
+        self.assertGreaterEqual(mock_validate.call_count, 2)
+        self.assertTrue(result.checker_approved)
+        self.assertEqual(result.metrics.semantic_revisions, 1)
+        self.assertEqual(result.metrics.semantic_review_failures, 1)
+
+
+class LlmProviderTests(unittest.TestCase):
+    def test_resolve_provider_by_model_name(self) -> None:
+        from jobapps.llm import resolve_provider
+
+        with patch.dict(
+            os.environ,
+            {"ANTHROPIC_API_KEY": "ak", "OPENAI_API_KEY": "sk", "LLM_PROVIDER": ""},
+            clear=False,
+        ):
+            self.assertEqual(resolve_provider("claude-4.5-sonnet"), "anthropic")
+            self.assertEqual(resolve_provider("gpt-4.1"), "openai")
+            self.assertEqual(resolve_provider("gpt-5.6-sol"), "openai")
+
+    def test_resolve_provider_falls_back_to_cursor(self) -> None:
+        from jobapps.llm import resolve_provider
+
+        with patch.dict(os.environ, {"LLM_PROVIDER": ""}, clear=False):
+            os.environ.pop("ANTHROPIC_API_KEY", None)
+            os.environ.pop("OPENAI_API_KEY", None)
+            os.environ.pop("LLM_PROVIDER", None)
+            self.assertEqual(resolve_provider("claude-4.5-sonnet"), "cursor")
+            self.assertEqual(resolve_provider("gpt-4.1"), "cursor")
+
+    def test_anthropic_model_alias(self) -> None:
+        from jobapps.llm import anthropic_model_id
+
+        self.assertEqual(anthropic_model_id("claude-4.5-sonnet"), "claude-sonnet-4-5")
+        self.assertEqual(anthropic_model_id("claude-sonnet-4-5"), "claude-sonnet-4-5")
+
+
 if __name__ == "__main__":
     unittest.main()
+
