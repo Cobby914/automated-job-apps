@@ -1,0 +1,15 @@
+contact:
+  name: Colin Kwon
+  email: colinkwon914@gmail.com
+  phone: "(661) 388-6492"
+  location: Irvine, CA
+  linkedin: https://www.linkedin.com/in/colin-kwon-22a190324/
+  github: https://github.com/Cobby914
+  website: "https://colinkwon914.com/"
+
+education:
+  - school: University of California, Irvine
+    degree: B.S. Computer Science
+    location: Irvine, CA
+    year: "June 2027"
+    details: Campuswide Honors Collegium at UCI; Dean's Honor List; Chancellor's Award for Excellence in Undergraduate Research

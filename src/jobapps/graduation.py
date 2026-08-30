@@ -169,9 +169,9 @@ def apply_graduation_to_cover_letter(cover: CoverLetter, year: str) -> CoverLett
 
 
 def apply_graduation(materials: GenerationResult, year: str) -> GenerationResult:
-    return materials.model_copy(
-        update={
-            "resume": apply_graduation_to_resume(materials.resume, year),
-            "cover_letter": apply_graduation_to_cover_letter(materials.cover_letter, year),
-        }
-    )
+    update: dict[str, object] = {
+        "resume": apply_graduation_to_resume(materials.resume, year),
+    }
+    if materials.cover_letter is not None:
+        update["cover_letter"] = apply_graduation_to_cover_letter(materials.cover_letter, year)
+    return materials.model_copy(update=update)

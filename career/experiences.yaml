@@ -1,0 +1,294 @@
+- id: mk-lending
+  company: M.K Lending
+  role: Software Engineer Intern
+  location: Brea, CA
+  start: Aug. 2024
+  end: Dec. 2025
+  tracks: [swe, ai, default]
+  tags: [backend, frontend, intern, apis, data-pipeline, dashboard]
+  domains: [fintech, mortgage]
+  technologies:
+    - TypeScript
+    - Node.js
+    - React
+    - Python
+    - pandas
+    - PostgreSQL
+    - REST APIs
+  summary: >
+    Built internal software and data-automation systems for mortgage/loan workflows
+    using TypeScript, Node.js, React, Python, pandas, PostgreSQL, and REST APIs.
+    Developed a loan-lookup API and interface that automated calculations previously
+    requiring substantial manual employee effort, a Python rate-sheet ingestion
+    pipeline that parsed and loaded rate information into PostgreSQL, and dashboards
+    that gave managers centralized visibility into employee loan activity.
+  facts:
+    - id: mk-lending.fact.1
+      text: Built internal software and data-automation systems for mortgage/loan workflows using TypeScript, Node.js, React, Python, pandas, PostgreSQL, and REST APIs.
+    - id: mk-lending.fact.2
+      text: Developed a loan-lookup API and interface that automated calculations previously requiring substantial manual employee effort.
+    - id: mk-lending.fact.3
+      text: Created a Python rate-sheet ingestion pipeline that parsed and transformed incoming rate information before loading it into PostgreSQL.
+    - id: mk-lending.fact.4
+      text: Built dashboards that gave managers centralized visibility into employee loan activity rather than requiring information to be gathered manually from separate sources.
+  metrics:
+    - id: mk-lending.metric.1
+      text: Reduced manual loan calculations by approximately 4 hours per day.
+    - id: mk-lending.metric.2
+      text: Automated rate-sheet processing, saving approximately 3 hours.
+    - id: mk-lending.metric.3
+      text: Dashboard supported 5+ managers.
+  bullets:
+    - id: mk-lending.bullet.1
+      text: Built a loan-lookup REST API using TypeScript and Node.js, reducing manual calculations by 4 hours per day.
+      sources: [mk-lending.fact.2, mk-lending.metric.1]
+    - id: mk-lending.bullet.2
+      text: Made a Python/pandas rate-sheet pipeline with PostgreSQL, saving 3 hours of processing time daily.
+      sources: [mk-lending.fact.3, mk-lending.metric.2]
+    - id: mk-lending.bullet.3
+      text: Created a dashboard tracking employee loans using React, PostgreSQL, and TypeScript for 5+ managers.
+      sources: [mk-lending.fact.4, mk-lending.metric.3]
+    - id: mk-lending.bullet.4
+      text: Built role-based loan views for 5+ managers using React and PostgreSQL, improving internal workflow visibility.
+      sources: [mk-lending.fact.4, mk-lending.metric.3]
+
+- id: tena
+  company: TENA
+  role: Technical Lead
+  location: Los Angeles, CA
+  start: Dec. 2025
+  end: Present
+  tracks: [swe, ai, default]
+  tags: [fullstack, leadership, frontend, backend, auth, cloud, agile]
+  domains: [web, nonprofit, production]
+  technologies:
+    - React
+    - Vite
+    - Chakra UI
+    - TanStack Query
+    - Zustand
+    - Node.js
+    - PostgreSQL
+    - REST APIs
+    - Firebase Auth
+    - Firebase Admin
+    - Render
+    - NeonDB
+    - AWS
+  summary: >
+    Leading development of a production full-stack platform consisting of a public
+    website, administrative portal, backend APIs, authentication system, and database
+    infrastructure. Built frontend functionality in React and designed REST APIs and
+    PostgreSQL schemas so nontechnical administrators can update site content without
+    developer intervention. Implemented Google Sign-In with Firebase Auth/Admin token
+    validation, coordinates Agile sprint planning, and migrated backend/database
+    infrastructure from Render and NeonDB to AWS.
+  facts:
+    - id: tena.fact.1
+      text: Leading development of a production full-stack platform with a public website, admin portal, backend APIs, authentication, and database infrastructure.
+    - id: tena.fact.2
+      text: Built frontend functionality using React, Vite, Chakra UI, TanStack Query, and Zustand.
+    - id: tena.fact.3
+      text: Designed backend REST APIs and PostgreSQL schemas that allow nontechnical administrators to update site content without developer intervention.
+    - id: tena.fact.4
+      text: Implemented administrator authentication with Google Sign-In, Firebase Auth, and Firebase Admin token validation.
+    - id: tena.fact.5
+      text: Coordinates Agile sprint planning, task delegation, engineering priorities, and feature delivery as Technical Lead.
+    - id: tena.fact.6
+      text: Migrated backend/database infrastructure from Render and NeonDB to AWS, reconciling services and validating authentication, API, and database workflows after deployment.
+  metrics:
+    - id: tena.metric.1
+      text: Product/site visits increased approximately 30%.
+  bullets:
+    - id: tena.bullet.1
+      text: Shipped a site and admin portal with React, Vite, Chakra UI, TanStack Query, and Zustand, surging visits by 30%.
+      sources: [tena.fact.2, tena.metric.1]
+    - id: tena.bullet.2
+      text: Orchestrating Agile sprint cycles and task delegation, maintaining high development velocity and ensure delivery.
+      sources: [tena.fact.5]
+    - id: tena.bullet.3
+      text: Built REST APIs and database schemas enabling non-developers to update site content without manual deployments.
+      sources: [tena.fact.3]
+    - id: tena.bullet.4
+      text: Implemented Google sign-in for admins with Firebase Auth and Firebase Admin token checking for secure API access.
+      sources: [tena.fact.4]
+    - id: tena.bullet.5
+      text: Migrated Node.js and PostgreSQL from Render/NeonDB to AWS, validating API and auth workflows post deployment.
+      sources: [tena.fact.6]
+
+- id: fipet
+  company: FiPET
+  role: Software Engineer Intern
+  location: San Francisco, CA
+  start: Dec. 2025
+  end: Present
+  tracks: [swe, default]
+  tags: [backend, intern, database, graph, testing]
+  domains: [social, consumer]
+  technologies:
+    - Firebase
+    - Firebase Emulator Suite
+    - Database Design
+    - ACID Transactions
+    - Query Optimization
+  summary: >
+    Working primarily on backend systems, database architecture, and social
+    relationship functionality. Designed a graph-oriented social schema supporting
+    friendship relationships and multi-level connection queries, optimized
+    friend-request workflows while maintaining ACID guarantees, and integrated the
+    Firebase Emulator Suite so features can be developed and tested locally.
+  facts:
+    - id: fipet.fact.1
+      text: Working primarily on backend systems, database architecture, and social relationship functionality.
+    - id: fipet.fact.2
+      text: Designed a graph-oriented social schema supporting friendship relationships and multi-level connection queries.
+    - id: fipet.fact.3
+      text: Optimized friend-request workflows and backend query logic while maintaining proper transactional behavior and ACID guarantees.
+    - id: fipet.fact.4
+      text: Integrated the Firebase Emulator Suite into the development workflow so features could be developed and tested locally with less dependence on production Firebase services.
+  metrics:
+    - id: fipet.metric.1
+      text: Reduced relevant backend/query latency by approximately 10%.
+  bullets:
+    - id: fipet.bullet.1
+      text: Architected a graph-based social schema to optimize multi-level connection and relationship queries.
+      sources: [fipet.fact.2]
+    - id: fipet.bullet.2
+      text: Optimized friend request flows and backend logic, reducing query latency by 10%, ensuring ACID compliance.
+      sources: [fipet.fact.3, fipet.metric.1]
+    - id: fipet.bullet.3
+      text: Integrated Firebase Emulator Suite into local development, accelerating backend testing and iteration.
+      sources: [fipet.fact.4]
+
+- id: uci-scalesense
+  company: University of California, Irvine
+  role: Research Assistant
+  location: Irvine, CA
+  start: Dec. 2025
+  end: Present
+  tracks: [ai]
+  tags: [research, autonomy, perception, simulation, ml, datasets]
+  domains: [autonomous-driving, computer-vision, robotics]
+  technologies:
+    - CARLA
+    - Python
+    - PyTorch
+    - Linux/Unix
+    - Radar
+    - Camera/Radar Sensor Fusion
+    - PointNet
+    - RadarGNN
+    - Dataset QA
+    - Computer Vision
+    - Deep Learning
+    - Multimodal Learning
+  summary: >
+    Conducting research on multimodal autonomous-driving perception using CARLA,
+    radar, cameras, Python, PyTorch, and Linux. Built an end-to-end simulation and
+    dataset-generation framework for evaluating infrastructure-mounted radar-camera
+    configurations, including configurable 4/8/12/14-radar layouts, synchronized
+    radar-camera captures, offline labeling/QA, and evaluation of PointNet and
+    RadarGNN. Research received UCI's Chancellor's Award for Excellence in
+    Undergraduate Research.
+  facts:
+    - id: uci-scalesense.fact.1
+      text: Conducting research on multimodal autonomous-driving perception using CARLA, radar, cameras, Python, PyTorch, and Linux.
+    - id: uci-scalesense.fact.2
+      text: Built an end-to-end simulation and dataset-generation framework for evaluating infrastructure-mounted radar-camera configurations under controlled traffic scenarios.
+    - id: uci-scalesense.fact.3
+      text: Developed configurable 4-, 8-, 12-, and 14-radar layouts and synchronized radar detections, camera frames, vehicle metadata, 3D bounding boxes, and sensor calibration through CARLA's synchronous simulation environment.
+    - id: uci-scalesense.fact.4
+      text: Built offline labeling and QA pipelines to associate radar returns with simulated actors, analyze sensor coverage and point density, and identify labeling or dataset-quality failures without rerunning simulations.
+    - id: uci-scalesense.fact.5
+      text: Used generated datasets to evaluate radar-based perception approaches including PointNet and RadarGNN.
+  metrics:
+    - id: uci-scalesense.metric.1
+      text: Generated/analyzed approximately 1.85 million radar returns.
+    - id: uci-scalesense.metric.2
+      text: Supported configurable 4 / 8 / 12 / 14-radar layouts.
+    - id: uci-scalesense.metric.3
+      text: QA/offline processing reached roughly 3,000 radar returns/sec.
+    - id: uci-scalesense.metric.4
+      text: Research received UCI's Chancellor's Award for Excellence in Undergraduate Research.
+  bullets:
+    - id: uci-scalesense.bullet.1
+      text: Researching a multi-modal perception system fusing camera and radar data to improve object detection accuracy.
+      sources: [uci-scalesense.fact.1]
+    - id: uci-scalesense.bullet.2
+      text: Implementing SOTA deep learning architectures in PyTorch on sensor calibration and spatial feature alignment.
+      sources: [uci-scalesense.fact.5]
+    - id: uci-scalesense.bullet.3
+      text: Engineered a CARLA pipeline to create a synchronized radar-camera dataset with labels and geometric metadata.
+      sources: [uci-scalesense.fact.2, uci-scalesense.fact.3]
+    - id: uci-scalesense.bullet.4
+      text: Generated 14 labeled capture sessions with ~1.85M radar returns for multimodal perception experiments.
+      sources: [uci-scalesense.metric.1, uci-scalesense.metric.2]
+    - id: uci-scalesense.bullet.5
+      text: Implemented OBB-based radar labeling with 87% precision, exporting labels and sensor extrinsics for training.
+      sources: [uci-scalesense.fact.4]
+
+- id: commit-the-change
+  company: Commit the Change
+  role: Software Engineer
+  location: Irvine, CA
+  start: Sep. 2025
+  end: May 2026
+  tracks: [swe, ai, default]
+  tags: [fullstack, frontend, backend, auth, healthcare, volunteer]
+  domains: [healthcare, nonprofit, civic]
+  technologies:
+    - React
+    - TypeScript
+    - Node.js
+    - Express
+    - PostgreSQL
+    - Google OAuth
+    - Axios
+    - Chakra UI
+    - REST APIs
+  summary: >
+    Built full-stack software for Celebrating Life Community Health Center using
+    React, TypeScript, Node.js, Express, PostgreSQL, Google OAuth, Axios, and
+    Chakra UI. Developed administrative and provider-management functionality
+    including RESTful CRUD routes, database schemas, frontend dashboards, and
+    authenticated approval workflows, moving operational tasks into a centralized
+    application used by clinic staff.
+  facts:
+    - id: commit-the-change.fact.1
+      text: Built full-stack software for Celebrating Life Community Health Center using React, TypeScript, Node.js, Express, PostgreSQL, Google OAuth, Axios, and Chakra UI.
+    - id: commit-the-change.fact.2
+      text: Developed administrative and provider-management functionality including RESTful CRUD routes, database schemas, frontend dashboards, and authenticated approval workflows.
+    - id: commit-the-change.fact.3
+      text: Worked across frontend and backend, including API design, database work, authentication, performance optimization, and administrative workflows.
+    - id: commit-the-change.fact.4
+      text: Built a provider directory and quota platform used by clinic staff rather than manually managed processes.
+  metrics:
+    - id: commit-the-change.metric.1
+      text: Reduced administrative/onboarding workflow time by approximately 40%.
+    - id: commit-the-change.metric.2
+      text: Improved data retrieval performance approximately 25%.
+    - id: commit-the-change.metric.3
+      text: One dashboard optimization reduced loading from approximately 40 seconds to 30 seconds.
+    - id: commit-the-change.metric.4
+      text: Platform was built for an organization serving 100+ local patients.
+    - id: commit-the-change.metric.5
+      text: Provider directory and quota platform used daily by 14 CLCHC staff members.
+  bullets:
+    - id: commit-the-change.bullet.1
+      text: Building a full-stack platform with React and Node.js for Celebrating Life CHC to serve 100+ local patients.
+      sources: [commit-the-change.fact.1, commit-the-change.metric.4]
+    - id: commit-the-change.bullet.2
+      text: Engineered an admin approval flow using Google OAuth and TypeScript APIs, reducing onboarding time by 40%.
+      sources: [commit-the-change.fact.2, commit-the-change.metric.1]
+    - id: commit-the-change.bullet.3
+      text: Developed RESTful CRUD routes for location management in Express, improving data retrieval speed by 25%.
+      sources: [commit-the-change.fact.2, commit-the-change.metric.2]
+    - id: commit-the-change.bullet.4
+      text: Built a React/Node.js provider directory and quota platform used daily by 14 CLCHC staff members.
+      sources: [commit-the-change.fact.4, commit-the-change.metric.5]
+    - id: commit-the-change.bullet.5
+      text: Developed a full-stack volunteer tracking dashboard using React, Chakra UI, and Node.js used by 5+ managers.
+      sources: [commit-the-change.fact.2]
+    - id: commit-the-change.bullet.6
+      text: Optimized case manager table loading latency using React, improving load times by 30 sec. compared to 40 sec.
+      sources: [commit-the-change.metric.3]

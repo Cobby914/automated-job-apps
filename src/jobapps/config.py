@@ -35,9 +35,11 @@ OUTPUT_DIR = ROOT / "output"
 RESUME_TEMPLATES_DIR = ROOT / "resume_templates"
 COVER_LETTER_TEMPLATES_DIR = ROOT / "cover_letter_templates"
 COVER_LETTER_EXAMPLES_DIR = ROOT / "cover_letter_examples"
+COVER_LETTER_EXAMPLE_PATH = COVER_LETTER_EXAMPLES_DIR / "Spacex_Cover_Letter.md"
 WRITING_SAMPLES_DIR = ROOT / "writing_samples"
 RESUME_ADDITIONS_DIR = ROOT / "resume_additions"
-SKILLS_BANK_PATH = RESUME_ADDITIONS_DIR / "skills.md"
+CAREER_DIR = ROOT / "career"
+SKILLS_BANK_PATH = CAREER_DIR / "skills.yaml"
 CONNECTIONS_PATH = ROOT / "connections" / "connections.yaml"
 
 
@@ -60,7 +62,11 @@ def cursor_writer_model() -> str:
 
 
 def cursor_checker_model() -> str:
-    return os.getenv("CURSOR_CHECKER_MODEL", "claude-opus-5").strip() or "claude-opus-5"
+    return os.getenv("CURSOR_CHECKER_MODEL", "claude-4.5-sonnet").strip() or "claude-4.5-sonnet"
+
+
+def cursor_escalation_model() -> str:
+    return os.getenv("CURSOR_ESCALATION_MODEL", "claude-opus-5").strip() or "claude-opus-5"
 
 
 def notion_configured() -> bool:

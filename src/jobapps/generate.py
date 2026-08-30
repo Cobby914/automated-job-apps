@@ -1,134 +1,126 @@
-"""Cursor-powered resume and cover letter tailoring."""
+"""Cursor-powered resume, cover letter, and screening-answer generation."""
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from pathlib import Path
 
 from cursor_sdk import Agent, AgentOptions, CursorAgentError, LocalAgentOptions
 
-from jobapps.config import ROOT, cursor_checker_model, cursor_writer_model, require_env
+from jobapps.career import CareerBank, ExperienceRecord, ProjectRecord
+from jobapps.config import (
+    COVER_LETTER_EXAMPLE_PATH,
+    ROOT,
+    cursor_checker_model,
+    cursor_escalation_model,
+    cursor_writer_model,
+    require_env,
+)
 from jobapps.models import (
-    MAX_BULLET_CHARS,
-    MIN_BULLET_CHARS,
     ApplicationAnswer,
     ApplicationAnswersResult,
-    GenerationResult,
+    ApplicationPlan,
+    CoverLetter,
+    DraftResume,
     Job,
-    Resume,
     ReviewResult,
-    TemplateChoice,
-    allowed_skill_names,
+    TailoredResume,
     overlong_answer_issues,
-    overlong_bullet_issues,
-    unknown_skill_issues,
 )
+from jobapps.plan import selected_experiences, selected_projects
 
-TEMPLATE_SELECTOR_PROMPT = """\
-You choose the best base resume template for one job application.
+RESUME_WRITER_PROMPT = """\
+You tailor a resume for one job from an ApplicationPlan and selected career records.
 
-Templates:
-- swe: general software engineering — backend, frontend, full-stack, APIs, databases, \
-cloud, web apps, DevOps, security engineering, and product engineering. Prefer when \
-the role emphasizes building/shipping software systems rather than ML research.
-- ai: AI/ML, computer vision, robotics, autonomy, perception, deep learning, research, \
-data science, embedded sensing, and simulation. Prefer when ML, PyTorch, CARLA, radar/camera, \
-or research-style work is central to the role.
-- default: mixed or ambiguous roles that do not clearly favor swe or ai, or broad \
-software roles where either mix could work equally well.
+Rules:
+- Never invent employers, job titles, dates, degrees, schools, projects, or skills.
+- Use only the selected experiences and projects provided. Do not add others.
+- Copy the provided skill_groups as-is. Do not add, invent, or rename skill items.
+- Leave resume.summary empty.
+- Keep education exactly as provided (including the graduation year).
+- Every experience must have {min_exp_bullets}-{max_exp_bullets} content bullets.
+- Every project must have exactly {proj_bullets} content bullets plus a trailing \
+"Stack: ..." line using the provided stack.
+- Each content bullet must be one printed line of {min_chars}-{max_chars} characters. \
+Prefer filling the line when facts allow; never exceed {max_chars}.
+- Start from the canonical bullets and expand with grounded tech and impact from \
+facts/metrics. Attach source ids on every bullet.
+- Write Jake Gutierrez-style lines: what + how (tech) + impact.
+- Do not mention that you are an AI.
+- Return JSON only matching the schema. No markdown, no code fences, no commentary.
+- Do not edit files, run commands, or use tools.
+"""
 
-Pick exactly one template that best matches the job title and description.
+COVER_LETTER_WRITER_PROMPT = """\
+You write a cover letter for one job using a finalized resume and a few supporting records.
+
+Rules:
+- Never invent employers, titles, dates, degrees, schools, projects, skills, or outcomes.
+- Ground every claim in the finalized resume or the supporting records.
+- First person, specific, no cliches, not a rewrite of the resume.
+- Write 4-6 substantive paragraphs that fill most of one page.
+- Structure: connection to the role/company; strongest relevant experience; second \
+technical experience or project; optional research/project depth; company-specific close.
+- Greeting should be "Dear Hiring Manager," unless the job text names a person.
+- Closing should be "Sincerely,"
+- Match the example's length and tone, not its company-specific content.
+- Use the exact education year from the resume. Do not change June 2027 vs Dec. 2027.
+- Do not mention that you are an AI.
+- Return JSON only matching the schema. No markdown, no code fences, no commentary.
+- Do not edit files, run commands, or use tools.
+"""
+
+CHECKER_PROMPT = """\
+You review a tailored resume and optional cover letter for grounding, relevance, and voice.
+
+Python already checked bullet length, skill whitelist, bullet counts, required sections, \
+Stack lines, and education fields. Do not reject for those mechanical issues.
+
+Approve only if all of these are true:
+- No invented employers, titles, dates, degrees, schools, projects, skills, or outcomes.
+- Every claim is grounded in the selected career records or the finalized resume.
+- Experiences and projects are relevant to the job.
+- Resume bullets read like a strong human resume (specific tech + impact).
+- If a cover letter is present: first person, specific, not a resume restatement, \
+not generic, 4-6 paragraphs of real substance.
+
 Return JSON only matching the schema. No markdown, no code fences, no commentary.
 Do not edit files, run commands, or use tools.
 """
 
-def _system_prompt() -> str:
-    return f"""\
-You tailor an existing resume and write a cover letter for one job.
+ANSWERS_WRITER_PROMPT = """\
+You write answers to optional job-application / screening questions for one role.
 
 Rules:
-- Never invent employers, job titles, dates, degrees, schools, projects, or skills.
-- Every Technical Skills item must appear in the skills bank. Do not invent skills.
-- Output 3-5 compact skill lines (one SkillGroup each); typical is 4. Start from the \
-bank's recommended general-purpose mix and swap or reweight categories for the job \
-(frontend → Frontend; ML/autonomy → AI/ML; embedded → Systems & Embedded).
-- Category labels may be compact (e.g. Backend/Data) even if they combine bank headings. \
-Item names must match the bank. Do not dump the whole bank. Do not print the \
-"Additional Technologies" heading; those names may still appear in other lines.
-- Only use facts from the provided resume and resume additions.
-- Start from "Resume bullets:" in additions (or matching base-resume bullets) and expand \
-each line with grounded tech, what you built, and impact. Use prose summaries and \
-"Best statistics" to add detail — do not leave bullets thin when richer facts exist.
-- Write full Jake Gutierrez-style lines: what + how (tech) + impact. Prefer \
-{MIN_BULLET_CHARS}-{MAX_BULLET_CHARS} characters per bullet when facts allow. Do not \
-compress to short stubs when the source supports a fuller line.
-- Shorten bullets only when they exceed {MAX_BULLET_CHARS} characters or when trimming \
-for a one-page overflow. Drop weaker bullets and reorder for the job when needed.
-- Do not add an employer, role, or project that is not named in the base resume or additions.
-- Keep education accurate; do not invent GPA, honors, or coursework.
-- Use the exact education year (graduation date) from the base resume in both \
-the resume and the cover letter. Do not change June 2027 vs Dec. 2027.
-- Leave resume.summary empty. Do not write a Summary section.
-- Fill most of one page (Jake Gutierrez density). Default target when material exists: \
-4 experiences and 3-4 projects. Drop a role/project only for weak relevance or after \
-a real one-page overflow — do not leave large empty space.
-- Bullet counts for each kept experience or project (content bullets only; \
-"Stack:" lines do not count): default to at least 3; use 4 when highly relevant; \
-allow fewer than 3 only when weakly relevant but still worth keeping.
-- Every kept project must end with a trailing "Stack: tech, ..." bullet so the \
-heading can show Name | tech. Use stacks from the base resume or additions.
-- Preserve education details that become Awards when present in the base resume.
-- The resume and cover letter must each fit on ONE page. Prefer dense, \
-non-wrapping content that fills the page; shorten only when needed to stay on one page.
-- Every resume bullet must be a single printed line: at most {MAX_BULLET_CHARS} characters. \
-No wrapping.
-- Cover letter structure, length, and tone must match the cover letter examples: \
-first person, specific, no cliches, not a rewrite of the resume. Write 4-6 substantive \
-paragraphs that fill most of one page. Each paragraph should develop one thread \
-(role fit, a key experience, research/project depth, team/leadership, why this company). \
-Base the cover letter on the examples; let additional writing samples inform \
-sentence-level prose style only (clarity, technical specificity, depth) — do not copy \
-their academic format or section structure.
-- Greeting should be "Dear Hiring Manager," unless the job text names a person.
-- Closing should be "Sincerely,"
-- Do not mention that you are an AI or that the letter was generated.
-- Return JSON only. No markdown, no code fences, no commentary.
+- Never invent employers, titles, dates, degrees, schools, projects, skills, or outcomes.
+- Ground every claim in the selected career records (summaries, facts, metrics, bullets).
+- Choose the best-matching experiences and projects for each question and the job.
+- If a question asks for N experiences or projects, use exactly that many when enough \
+grounded material exists.
+- Match a clear, specific, technical first-person voice.
+- Respect each question's max_length (character count of the answer string). If \
+max_length is null/omitted, there is no limit.
+- Use the character budget: short limits stay tight. Larger limits should add more \
+grounded experiences and projects, not fluff.
+- Answer every question in the same order. Copy each prompt and max_length into the output.
+- Do not mention that you are an AI.
+- Return JSON only matching the schema. No markdown, no code fences, no commentary.
 - Do not edit files, run commands, or use tools.
 """
 
+ANSWERS_CHECKER_PROMPT = """\
+You are reviewing application-question answers before they are submitted.
 
-def _checker_prompt() -> str:
-    return f"""\
-You are reviewing a tailored resume and cover letter before they are sent.
+Python already checked character limits. Do not reject only for length.
 
 Approve only if all of these are true:
-- resume.summary is empty (no Summary section).
-- No invented employers, titles, dates, degrees, schools, projects, or skills.
-- Every Technical Skills item appears in the skills bank; the skills section is 3-5 \
-compact lines, not a dump of the bank.
-- Every fact is grounded in the base resume or the experience/project notes.
-- Bullets are expanded from "Resume bullets:" (or base-resume equivalents) with grounded \
-tech + impact — not thin stubs when richer source bullets or statistics exist.
-- Density matches a strong one-page Jake Gutierrez resume: typically ~4 experiences and \
-3-4 projects when enough grounded material exists. Reject sparse drafts that leave large \
-empty space (e.g. only 1 project when several relevant ones are available).
-- Highly relevant roles/projects have at least 3 content bullets \
-("Stack:" lines do not count). Weakly relevant kept items may have fewer.
-- Every kept project includes a trailing "Stack: ..." bullet.
-- Resume bullets are specific, relevant to the job, and read like a strong human resume.
-- Bullets use most of the allowed line length when facts allow (typically \
-{MIN_BULLET_CHARS}-{MAX_BULLET_CHARS} chars). Reject unnecessarily short bullets \
-under {MIN_BULLET_CHARS} characters when the source material supports a fuller line.
-- Every resume bullet is one printed line (at most {MAX_BULLET_CHARS} characters); \
-reject any longer bullet.
-- The resume and cover letter each fit on one page without large unused whitespace \
-and without overflowing to a second page.
-- Cover letter matches the example structure and tone: first person, specific, not a \
-resume restatement, not generic. Write 4-6 substantive paragraphs that fill most of \
-one page when grounded material exists. Reject thin or generic letters with fewer than \
-4 paragraphs when the resume and additions support more depth. Reject overflow beyond \
-one page.
-- Length and tone are appropriate for a real application.
+- No invented employers, titles, dates, degrees, schools, projects, skills, or outcomes.
+- Every fact is grounded in the selected career records.
+- Experiences/projects chosen are relevant to the job and the question.
+- When a question asks for a specific number of experiences or projects, the answer \
+uses that count when enough grounded material exists.
+- Tone is first-person, specific, and appropriate for a real application.
 
 Return JSON only matching the schema. No markdown, no code fences, no commentary.
 Do not edit files, run commands, or use tools.
@@ -157,7 +149,7 @@ def extract_json(text: str) -> str:
     return cleaned[start : end + 1]
 
 
-def _run_prompt(prompt: str, model: str) -> str:
+def run_prompt(prompt: str, model: str) -> str:
     try:
         result = Agent.prompt(
             prompt,
@@ -181,11 +173,18 @@ def _run_prompt(prompt: str, model: str) -> str:
     return str(text)
 
 
-def _parse_generation(text: str) -> GenerationResult:
+def _parse_draft_resume(text: str) -> DraftResume:
     try:
-        return GenerationResult.model_validate_json(extract_json(text))
+        return DraftResume.model_validate_json(extract_json(text))
     except Exception as error:
-        raise RuntimeError(f"Writer returned invalid resume/cover letter JSON: {error}") from error
+        raise RuntimeError(f"Writer returned invalid resume JSON: {error}") from error
+
+
+def _parse_cover_letter(text: str) -> CoverLetter:
+    try:
+        return CoverLetter.model_validate_json(extract_json(text))
+    except Exception as error:
+        raise RuntimeError(f"Writer returned invalid cover letter JSON: {error}") from error
 
 
 def _parse_review(text: str) -> ReviewResult:
@@ -195,40 +194,21 @@ def _parse_review(text: str) -> ReviewResult:
         raise RuntimeError(f"Checker returned invalid review JSON: {error}") from error
 
 
-def _parse_template_choice(text: str) -> TemplateChoice:
+def _parse_answers(text: str) -> ApplicationAnswersResult:
     try:
-        return TemplateChoice.model_validate_json(extract_json(text))
+        return ApplicationAnswersResult.model_validate_json(extract_json(text))
     except Exception as error:
-        raise RuntimeError(f"Template selector returned invalid JSON: {error}") from error
+        raise RuntimeError(f"Writer returned invalid application answers JSON: {error}") from error
 
 
-def select_resume_template(job: Job) -> TemplateChoice:
-    """Choose swe, ai, or default from the job title and description."""
-    schema = _dump(TemplateChoice.model_json_schema())
-    prompt = f"""\
-{TEMPLATE_SELECTOR_PROMPT}
-
-JSON schema:
-{schema}
-
-Company: {job.company}
-Title: {job.title}
-Notes: {job.notes or "(none)"}
-
-### Job description
-{job.description}
-"""
-    return _parse_template_choice(_run_prompt(prompt, cursor_writer_model()))
+def load_cover_letter_example(path: Path | None = None) -> str:
+    target = path or COVER_LETTER_EXAMPLE_PATH
+    if not target.is_file():
+        return ""
+    return target.read_text(encoding="utf-8").strip()
 
 
-def _context_block(
-    job: Job,
-    resume: Resume,
-    additions: str,
-    examples: str,
-    skills_bank: str = "",
-    writing_samples: str = "",
-) -> str:
+def _job_header(job: Job) -> str:
     return f"""\
 ## Job
 Company: {job.company}
@@ -236,308 +216,155 @@ Title: {job.title}
 Portal: {job.portal_url or "(none)"}
 Notes: {job.notes or "(none)"}
 Starts: {job.starts or "(infer from description)"}
-Graduation date (required): {resume.education[0].year if resume.education else "(none)"}
-Template track: {job.template}
 
 ### Description
 {job.description}
+"""
 
-## Base resume (source of truth)
+
+def _records_payload(
+    experiences: list[ExperienceRecord],
+    projects: list[ProjectRecord],
+) -> dict[str, object]:
+    return {
+        "experiences": [item.prompt_payload() for item in experiences],
+        "projects": [item.prompt_payload() for item in projects],
+    }
+
+
+def generate_resume_draft(
+    job: Job,
+    plan: ApplicationPlan,
+    bank: CareerBank,
+) -> tuple[DraftResume, int]:
+    """Write a tailored resume from the plan. Returns (draft, context_chars)."""
+    experiences = selected_experiences(plan, bank)
+    projects = selected_projects(plan, bank)
+    layout = plan.layout
+    prompt_body = f"""\
+{RESUME_WRITER_PROMPT.format(
+    min_exp_bullets=layout.min_experience_bullets,
+    max_exp_bullets=layout.max_experience_bullets,
+    proj_bullets=layout.project_bullets,
+    min_chars=layout.min_bullet_chars,
+    max_chars=layout.max_bullet_chars,
+)}
+
+JSON schema:
+{_dump(DraftResume.model_json_schema())}
+
+{_job_header(job)}
+
+## ApplicationPlan
+{_dump(plan.model_dump())}
+
+## Selected career records (only these may appear)
+{_dump(_records_payload(experiences, projects))}
+
+## Education (copy exactly, including year)
+{_dump([item.model_dump() for item in bank.profile.education])}
+
+## Approved skills (copy as-is; do not invent names)
+{_dump([group.model_dump() for group in plan.skill_groups])}
+"""
+    draft = _parse_draft_resume(run_prompt(prompt_body, cursor_writer_model()))
+    if not draft.skills:
+        draft = draft.model_copy(update={"skills": list(plan.skill_groups)})
+    if not draft.education:
+        draft = draft.model_copy(update={"education": list(bank.profile.education)})
+    return draft, len(prompt_body)
+
+
+def generate_cover_letter_draft(
+    job: Job,
+    plan: ApplicationPlan,
+    bank: CareerBank,
+    resume: TailoredResume,
+) -> CoverLetter:
+    source_ids = plan.cover_letter_source_ids
+    experiences = [
+        item for item in selected_experiences(plan, bank) if item.id in source_ids
+    ]
+    projects = [item for item in selected_projects(plan, bank) if item.id in source_ids]
+    # Preserve plan order for supporting records.
+    ordered: list[ExperienceRecord | ProjectRecord] = []
+    lookup = {item.id: item for item in [*experiences, *projects]}
+    for record_id in source_ids:
+        if record_id in lookup:
+            ordered.append(lookup[record_id])
+    supporting = [item.prompt_payload() for item in ordered]
+    example = load_cover_letter_example()
+    prompt_body = f"""\
+{COVER_LETTER_WRITER_PROMPT}
+
+JSON schema:
+{_dump(CoverLetter.model_json_schema())}
+
+{_job_header(job)}
+
+## Finalized resume
 {_dump(resume.model_dump())}
 
-## Skills bank (allowed inventory — select a short subset; do not invent)
-{skills_bank or "(none)"}
+## Supporting experiences/projects
+{_dump(supporting)}
 
-## Extra experience/project notes — expand "Resume bullets:" with grounded tech + impact
-{additions or "(none)"}
-
-## Cover letter examples (match structure, length, and tone)
-{examples or "(none — use a professional first-person cover letter format)"}
-
-## Additional writing samples (prose style only — do not copy format or content)
-These are research/project writeups, not cover letters. Use them only to match \
-the author's writing style: clarity, technical specificity, and depth. Do not \
-mirror their section structure or academic tone in the cover letter.
-{writing_samples or "(none)"}
+## Cover letter example (structure, length, and tone only)
+{example or "(none — use a professional first-person cover letter format)"}
 """
+    return _parse_cover_letter(run_prompt(prompt_body, cursor_writer_model()))
 
 
-def _write_draft(
+def _review_prompt(
     job: Job,
-    resume: Resume,
-    additions: str,
-    examples: str,
-    skills_bank: str = "",
-    writing_samples: str = "",
-    extra: str = "",
-) -> GenerationResult:
-    schema = _dump(GenerationResult.model_json_schema())
-    prompt = f"""\
-{_system_prompt()}
+    plan: ApplicationPlan,
+    bank: CareerBank,
+    resume: TailoredResume,
+    cover: CoverLetter | None,
+) -> str:
+    experiences = selected_experiences(plan, bank)
+    projects = selected_projects(plan, bank)
+    cover_block = _dump(cover.model_dump()) if cover is not None else "(cover letter skipped)"
+    return f"""\
+{CHECKER_PROMPT}
 
 JSON schema:
-{schema}
+{_dump(ReviewResult.model_json_schema())}
 
-{_context_block(job, resume, additions, examples, skills_bank, writing_samples)}
-{extra}
-Return a tailored resume and cover letter as one JSON object matching the schema. \
-Contact information is applied separately; you do not need to include it.
+{_job_header(job)}
+
+## ApplicationPlan
+{_dump(plan.model_dump())}
+
+## Selected career records
+{_dump(_records_payload(experiences, projects))}
+
+## Draft resume
+{_dump(resume.model_dump())}
+
+## Draft cover letter
+{cover_block}
 """
-    return _parse_generation(_run_prompt(prompt, cursor_writer_model()))
 
 
-def _review_draft(
+def review_materials(
     job: Job,
-    resume: Resume,
-    additions: str,
-    examples: str,
-    draft: GenerationResult,
-    skills_bank: str = "",
-    writing_samples: str = "",
-) -> ReviewResult:
-    schema = _dump(ReviewResult.model_json_schema())
-    prompt = f"""\
-{_checker_prompt()}
+    plan: ApplicationPlan,
+    bank: CareerBank,
+    resume: TailoredResume,
+    cover: CoverLetter | None,
+) -> tuple[ReviewResult, bool, str]:
+    """Sonnet review; escalate to Opus only when Sonnet flags an issue.
 
-JSON schema:
-{schema}
-
-{_context_block(job, resume, additions, examples, skills_bank, writing_samples)}
-
-## Draft to review
-{_dump(draft.model_dump())}
-"""
-    return _parse_review(_run_prompt(prompt, cursor_checker_model()))
-
-
-@dataclass
-class GeneratedMaterials:
-    materials: GenerationResult
-    review: ReviewResult
-    writer_model: str
-    checker_model: str
-    revised: bool
-
-
-def _bullet_feedback(issues: list[str]) -> str:
-    return f"""
-## Bullet length violations — shorten every listed bullet to at most {MAX_BULLET_CHARS} characters
-Each resume bullet must fit on one printed line. Shorten wording; do not invent facts. \
-Prefer keeping wording close to "Resume bullets:" from the additions. \
-Return a full replacement JSON object.
-{_dump({"issues": issues})}
-"""
-
-
-def _skills_feedback(issues: list[str]) -> str:
-    return f"""
-## Invented skills — every item must appear in the skills bank
-Drop or replace each listed item with a name from the skills bank. Do not invent skills. \
-Keep 3-5 compact skill lines. Return a full replacement JSON object.
-{_dump({"issues": issues})}
-"""
-
-
-def rewrite_draft(
-    job: Job,
-    resume: Resume,
-    additions: str,
-    examples: str,
-    draft: GenerationResult,
-    feedback: str,
-    skills_bank: str = "",
-    writing_samples: str = "",
-) -> GenerationResult:
-    """Rewrite materials using concrete feedback (page overflow, bullets, etc.)."""
-    extra = f"""
-## Revision feedback — address every issue
-Keep every fact grounded in the base resume or additions. Expand "Resume bullets:" \
-with grounded tech + impact. Every skill item must appear in the skills bank. \
-Return a full replacement JSON object.
-
-Current draft:
-{_dump(draft.model_dump())}
-
-{feedback}
-"""
-    return _write_draft(
-        job, resume, additions, examples, skills_bank, writing_samples, extra=extra
-    )
-
-
-def _ensure_bullet_length(
-    job: Job,
-    resume: Resume,
-    additions: str,
-    examples: str,
-    draft: GenerationResult,
-    skills_bank: str = "",
-    writing_samples: str = "",
-) -> tuple[GenerationResult, bool]:
-    issues = overlong_bullet_issues(draft.resume)
-    if not issues:
-        return draft, False
-    draft = rewrite_draft(
-        job,
-        resume,
-        additions,
-        examples,
-        draft,
-        _bullet_feedback(issues),
-        skills_bank,
-        writing_samples,
-    )
-    issues = overlong_bullet_issues(draft.resume)
-    if issues:
-        joined = "; ".join(issues[:5])
-        raise RuntimeError(
-            f"Resume bullets still exceed {MAX_BULLET_CHARS} characters after rewrite: {joined}"
-        )
-    return draft, True
-
-
-def _ensure_known_skills(
-    job: Job,
-    resume: Resume,
-    additions: str,
-    examples: str,
-    draft: GenerationResult,
-    skills_bank: str,
-    writing_samples: str = "",
-) -> tuple[GenerationResult, bool]:
-    if not skills_bank.strip():
-        return draft, False
-    allowed = allowed_skill_names(skills_bank)
-    issues = unknown_skill_issues(draft.resume, allowed)
-    if not issues:
-        return draft, False
-    draft = rewrite_draft(
-        job,
-        resume,
-        additions,
-        examples,
-        draft,
-        _skills_feedback(issues),
-        skills_bank,
-        writing_samples,
-    )
-    issues = unknown_skill_issues(draft.resume, allowed)
-    if issues:
-        joined = "; ".join(issues[:5])
-        raise RuntimeError(f"Resume still has skills not in the skills bank: {joined}")
-    return draft, True
-
-
-def generate(
-    job: Job,
-    resume: Resume,
-    additions: str,
-    examples: str,
-    skills_bank: str = "",
-    writing_samples: str = "",
-) -> GeneratedMaterials:
-    draft = _write_draft(job, resume, additions, examples, skills_bank, writing_samples)
-    review = _review_draft(
-        job, resume, additions, examples, draft, skills_bank, writing_samples
-    )
-    revised = False
-    bullet_issues = overlong_bullet_issues(draft.resume)
-    skill_issues = (
-        unknown_skill_issues(draft.resume, allowed_skill_names(skills_bank))
-        if skills_bank.strip()
-        else []
-    )
-    if not review.approved or bullet_issues or skill_issues:
-        issues = list(review.issues) if review.issues else []
-        if not review.approved and not issues:
-            issues.append(review.summary or "The draft did not look strong enough.")
-        issues.extend(bullet_issues)
-        issues.extend(skill_issues)
-        extra = f"""
-## Checker / length / skills feedback — revise the draft to address every issue
-{_dump({"summary": review.summary, "issues": issues})}
-
-Every resume bullet must be at most {MAX_BULLET_CHARS} characters (one printed line). \
-Prefer {MIN_BULLET_CHARS}-{MAX_BULLET_CHARS} chars when facts allow; expand thin bullets \
-from the source material.
-Every skill item must appear in the skills bank. Keep 3-5 compact skill lines.
-Keep every fact grounded in the base resume or additions. Expand "Resume bullets:" \
-with grounded tech + impact rather than compressing to stubs.
-Return a full replacement JSON object.
-"""
-        draft = _write_draft(
-            job, resume, additions, examples, skills_bank, writing_samples, extra=extra
-        )
-        review = _review_draft(
-            job, resume, additions, examples, draft, skills_bank, writing_samples
-        )
-        revised = True
-
-    draft, bullet_revised = _ensure_bullet_length(
-        job, resume, additions, examples, draft, skills_bank, writing_samples
-    )
-    draft, skills_revised = _ensure_known_skills(
-        job, resume, additions, examples, draft, skills_bank, writing_samples
-    )
-    return GeneratedMaterials(
-        materials=draft,
-        review=review,
-        writer_model=cursor_writer_model(),
-        checker_model=cursor_checker_model(),
-        revised=revised or bullet_revised or skills_revised,
-    )
-
-
-ANSWERS_WRITER_PROMPT = """\
-You write answers to optional job-application / screening questions for one role.
-
-Rules:
-- Never invent employers, titles, dates, degrees, schools, projects, skills, or outcomes.
-- Ground every claim in the base resume, resume additions, or writing samples.
-- Lean on the opening prose summaries in resume additions (experiences/projects) as \
-primary story context — problem, approach, and impact. Use "Best statistics" and \
-"Resume bullets" for concrete numbers and tech. Use writing samples when a question \
-needs deeper project/research narrative.
-- Choose the best-matching experiences and projects for each question and for the job \
-description. If a question asks for N experiences or projects, use exactly that many \
-when enough grounded material exists.
-- Match the author's voice: clear, specific, technical, first person when natural.
-- Respect each question's max_length (character count of the answer string). If \
-max_length is null/omitted, there is no limit.
-- Use the character budget: short limits (e.g. ~200) stay tight and pick the single \
-best story. Larger limits (e.g. ~2000) or unlimited should fill most of the allowed \
-space with additional grounded experiences and projects that strengthen the answer \
-— more relevant roles, technical depth, and concrete outcomes — not fluff, \
-repetition, or padding. Prefer adding another well-matched experience/project over \
-stopping early when room remains and source material supports it.
-- Answer every question in the same order as given. Copy each prompt and max_length \
-into the output answers list.
-- Do not mention that you are an AI or that the answers were generated.
-- Return JSON only matching the schema. No markdown, no code fences, no commentary.
-- Do not edit files, run commands, or use tools.
-"""
-
-ANSWERS_CHECKER_PROMPT = """\
-You are reviewing application-question answers before they are submitted.
-
-Approve only if all of these are true:
-- No invented employers, titles, dates, degrees, schools, projects, skills, or outcomes.
-- Every fact is grounded in the base resume, resume additions, or writing samples.
-- Answers lean on addition summary-level detail when available, not vague restatements \
-of thin bullets.
-- Experiences/projects chosen are relevant to the job description and to the question.
-- When a question asks for a specific number of experiences or projects, the answer \
-uses that count when enough grounded material exists.
-- Each answer with a max_length is at most that many characters (len of the answer string).
-- Budget use: short max_length answers may be brief. For large max_length (roughly \
-1000+) or unlimited, reject thin answers that leave most of the budget unused when \
-more grounded experiences/projects could strengthen the response. Unused room should \
-be filled with additional relevant substance, not padding.
-- Tone is first-person, specific, and appropriate for a real application.
-
-Return JSON only matching the schema. No markdown, no code fences, no commentary.
-Do not edit files, run commands, or use tools.
-"""
+    Returns (review, escalated, model_used).
+    """
+    prompt = _review_prompt(job, plan, bank, resume, cover)
+    checker = cursor_checker_model()
+    review = _parse_review(run_prompt(prompt, checker))
+    if review.approved and not review.issues:
+        return review, False, checker
+    escalation = cursor_escalation_model()
+    review = _parse_review(run_prompt(prompt, escalation))
+    return review, True, escalation
 
 
 @dataclass
@@ -547,58 +374,11 @@ class GeneratedAnswers:
     writer_model: str
     checker_model: str
     revised: bool
+    escalated: bool = False
 
 
-def _answers_context_block(
-    job: Job,
-    resume: Resume,
-    additions: str,
-    writing_samples: str = "",
-) -> str:
-    questions_payload = [
-        {"prompt": q.prompt, "max_length": q.max_length} for q in job.questions
-    ]
-    return f"""\
-## Job
-Company: {job.company}
-Title: {job.title}
-Portal: {job.portal_url or "(none)"}
-Notes: {job.notes or "(none)"}
-
-### Description
-{job.description}
-
-## Base resume (source of truth)
-{_dump(resume.model_dump())}
-
-## Experience/project notes — lean on opening summaries for story context
-Each note typically starts with a prose summary, then optional "Best statistics" and \
-"Resume bullets". Prefer the summary paragraphs when answering screening questions; \
-use stats/bullets for concrete numbers and tech names.
-{additions or "(none)"}
-
-## Writing samples (deeper project/research prose — content + voice)
-Use these when a question needs more depth than the addition summaries provide. \
-Match clarity and technical specificity; do not invent beyond what is written.
-{writing_samples or "(none)"}
-
-## Questions to answer (preserve order, prompt, and max_length)
-{_dump(questions_payload)}
-"""
-
-
-def _parse_answers(text: str) -> ApplicationAnswersResult:
-    try:
-        return ApplicationAnswersResult.model_validate_json(extract_json(text))
-    except Exception as error:
-        raise RuntimeError(f"Writer returned invalid application answers JSON: {error}") from error
-
-
-def _align_answers(
-    job: Job, result: ApplicationAnswersResult
-) -> ApplicationAnswersResult:
-    """Ensure prompts/max_length match the job questions; pad or trim if needed."""
-    aligned: list = []
+def _align_answers(job: Job, result: ApplicationAnswersResult) -> ApplicationAnswersResult:
+    aligned: list[ApplicationAnswer] = []
     for index, question in enumerate(job.questions):
         if index < len(result.answers):
             item = result.answers[index]
@@ -618,86 +398,83 @@ def _align_answers(
     return ApplicationAnswersResult(answers=aligned)
 
 
+def _answers_context(
+    job: Job,
+    plan: ApplicationPlan,
+    bank: CareerBank,
+) -> str:
+    experiences = selected_experiences(plan, bank)
+    projects = selected_projects(plan, bank)
+    questions_payload = [
+        {"prompt": q.prompt, "max_length": q.max_length} for q in job.questions
+    ]
+    return f"""\
+{_job_header(job)}
+
+## Selected career records (summaries, facts, metrics, bullets)
+{_dump(_records_payload(experiences, projects))}
+
+## Questions to answer (preserve order, prompt, and max_length)
+{_dump(questions_payload)}
+"""
+
+
 def _write_answers_draft(
     job: Job,
-    resume: Resume,
-    additions: str,
-    writing_samples: str = "",
+    plan: ApplicationPlan,
+    bank: CareerBank,
     extra: str = "",
 ) -> ApplicationAnswersResult:
-    schema = _dump(ApplicationAnswersResult.model_json_schema())
     prompt = f"""\
 {ANSWERS_WRITER_PROMPT}
 
 JSON schema:
-{schema}
+{_dump(ApplicationAnswersResult.model_json_schema())}
 
-{_answers_context_block(job, resume, additions, writing_samples)}
+{_answers_context(job, plan, bank)}
 {extra}
 Return answers as one JSON object matching the schema.
 """
-    draft = _parse_answers(_run_prompt(prompt, cursor_writer_model()))
+    draft = _parse_answers(run_prompt(prompt, cursor_writer_model()))
     return _align_answers(job, draft)
 
 
-def _review_answers_draft(
+def _review_answers(
     job: Job,
-    resume: Resume,
-    additions: str,
+    plan: ApplicationPlan,
+    bank: CareerBank,
     draft: ApplicationAnswersResult,
-    writing_samples: str = "",
-) -> ReviewResult:
-    schema = _dump(ReviewResult.model_json_schema())
+) -> tuple[ReviewResult, bool, str]:
     prompt = f"""\
 {ANSWERS_CHECKER_PROMPT}
 
 JSON schema:
-{schema}
+{_dump(ReviewResult.model_json_schema())}
 
-{_answers_context_block(job, resume, additions, writing_samples)}
+{_answers_context(job, plan, bank)}
 
 ## Draft answers to review
 {_dump(draft.model_dump())}
 """
-    return _parse_review(_run_prompt(prompt, cursor_checker_model()))
-
-
-def _ensure_answer_length(
-    job: Job,
-    resume: Resume,
-    additions: str,
-    draft: ApplicationAnswersResult,
-    writing_samples: str = "",
-) -> tuple[ApplicationAnswersResult, bool]:
-    issues = overlong_answer_issues(draft)
-    if not issues:
-        return draft, False
-    extra = f"""
-## Length violations — shorten every listed answer to its max_length
-Do not invent facts. Preserve grounding in resume additions summaries and writing \
-samples. Return a full replacement JSON object.
-{_dump({"issues": issues})}
-"""
-    draft = _write_answers_draft(job, resume, additions, writing_samples, extra=extra)
-    issues = overlong_answer_issues(draft)
-    if issues:
-        joined = "; ".join(issues[:5])
-        raise RuntimeError(f"Application answers still exceed max_length after rewrite: {joined}")
-    return draft, True
+    checker = cursor_checker_model()
+    review = _parse_review(run_prompt(prompt, checker))
+    if review.approved and not review.issues:
+        return review, False, checker
+    escalation = cursor_escalation_model()
+    review = _parse_review(run_prompt(prompt, escalation))
+    return review, True, escalation
 
 
 def generate_answers(
     job: Job,
-    resume: Resume,
-    additions: str,
-    writing_samples: str = "",
+    plan: ApplicationPlan,
+    bank: CareerBank,
 ) -> GeneratedAnswers:
-    """Generate screening-question answers with writer then checker. Caller skips if empty."""
     if not job.questions:
         raise ValueError("generate_answers called with no questions on the job.")
 
-    draft = _write_answers_draft(job, resume, additions, writing_samples)
-    review = _review_answers_draft(job, resume, additions, draft, writing_samples)
+    draft = _write_answers_draft(job, plan, bank)
+    review, escalated, checker_model = _review_answers(job, plan, bank, draft)
     revised = False
     length_issues = overlong_answer_issues(draft)
     if not review.approved or length_issues:
@@ -709,20 +486,18 @@ def generate_answers(
 ## Checker / length feedback — revise the answers to address every issue
 {_dump({"summary": review.summary, "issues": issues})}
 
-Respect each question's max_length. Keep every fact grounded in the base resume, \
-resume addition summaries, or writing samples. Return a full replacement JSON object.
+Respect each question's max_length. Keep every fact grounded in the selected records.
+Return a full replacement JSON object.
 """
-        draft = _write_answers_draft(job, resume, additions, writing_samples, extra=extra)
-        review = _review_answers_draft(job, resume, additions, draft, writing_samples)
+        draft = _write_answers_draft(job, plan, bank, extra=extra)
+        review, escalated, checker_model = _review_answers(job, plan, bank, draft)
         revised = True
 
-    draft, length_revised = _ensure_answer_length(
-        job, resume, additions, draft, writing_samples
-    )
     return GeneratedAnswers(
         answers=draft,
         review=review,
         writer_model=cursor_writer_model(),
-        checker_model=cursor_checker_model(),
-        revised=revised or length_revised,
+        checker_model=checker_model,
+        revised=revised,
+        escalated=escalated,
     )

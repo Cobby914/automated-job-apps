@@ -56,6 +56,8 @@ class Job(BaseModel):
     starts: str = ""
     # Optional force: "June 2027" or "Dec. 2027". When empty, inferred from starts.
     graduation: str = ""
+    # Skip cover-letter generation, review, and PDF when false.
+    cover_letter: bool = True
     # Optional screening / portal questions. Empty → skip answer generation.
     questions: list[ApplicationQuestion] = Field(default_factory=list)
 
@@ -164,9 +166,113 @@ class CoverLetter(BaseModel):
     closing: str
 
 
+class SourcedBullet(BaseModel):
+    text: str
+    sources: list[str] = Field(default_factory=list)
+
+
+def coerce_sourced_bullets(value: object) -> object:
+    if not isinstance(value, list):
+        return value
+    coerced: list[object] = []
+    for item in value:
+        if isinstance(item, str):
+            coerced.append({"text": item, "sources": []})
+        else:
+            coerced.append(item)
+    return coerced
+
+
+class DraftExperience(BaseModel):
+    company: str
+    role: str
+    location: str = ""
+    start: str = ""
+    end: str = ""
+    bullets: list[SourcedBullet] = Field(default_factory=list)
+
+    @field_validator("bullets", mode="before")
+    @classmethod
+    def coerce_bullets(cls, value: object) -> object:
+        return coerce_sourced_bullets(value)
+
+    def to_experience(self) -> Experience:
+        return Experience(
+            company=self.company,
+            role=self.role,
+            location=self.location,
+            start=self.start,
+            end=self.end,
+            bullets=[item.text for item in self.bullets],
+        )
+
+
+class DraftProject(BaseModel):
+    name: str
+    url: str = ""
+    bullets: list[SourcedBullet] = Field(default_factory=list)
+
+    @field_validator("bullets", mode="before")
+    @classmethod
+    def coerce_bullets(cls, value: object) -> object:
+        return coerce_sourced_bullets(value)
+
+    def to_project(self) -> Project:
+        return Project(
+            name=self.name,
+            url=self.url,
+            bullets=[item.text for item in self.bullets],
+        )
+
+
+class DraftResume(BaseModel):
+    summary: str = ""
+    experience: list[DraftExperience] = Field(default_factory=list)
+    projects: list[DraftProject] = Field(default_factory=list)
+    education: list[Education] = Field(default_factory=list)
+    skills: list[SkillGroup] = Field(default_factory=list)
+
+    def to_tailored(self) -> TailoredResume:
+        return TailoredResume(
+            summary=self.summary,
+            experience=[item.to_experience() for item in self.experience],
+            projects=[item.to_project() for item in self.projects],
+            education=self.education,
+            skills=self.skills,
+        )
+
+
+def draft_from_tailored(resume: TailoredResume) -> DraftResume:
+    """Wrap a rendered resume as a draft with empty source lists."""
+    return DraftResume(
+        summary=resume.summary,
+        experience=[
+            DraftExperience(
+                company=item.company,
+                role=item.role,
+                location=item.location,
+                start=item.start,
+                end=item.end,
+                bullets=[SourcedBullet(text=bullet) for bullet in item.bullets],
+            )
+            for item in resume.experience
+        ],
+        projects=[
+            DraftProject(
+                name=item.name,
+                url=item.url,
+                bullets=[SourcedBullet(text=bullet) for bullet in item.bullets],
+            )
+            for item in resume.projects
+        ],
+        education=resume.education,
+        skills=resume.skills,
+    )
+
+
 class GenerationResult(BaseModel):
     resume: TailoredResume
-    cover_letter: CoverLetter
+    cover_letter: CoverLetter | None = None
 
 
 class ApplicationAnswer(BaseModel):
@@ -183,6 +289,49 @@ class ReviewResult(BaseModel):
     approved: bool
     summary: str = ""
     issues: list[str] = Field(default_factory=list)
+
+
+class LayoutBudget(BaseModel):
+    min_experiences: int = 3
+    max_experiences: int = 4
+    min_projects: int = 2
+    max_projects: int = 3
+    min_experience_bullets: int = 2
+    max_experience_bullets: int = 3
+    project_bullets: int = 2
+    min_bullet_chars: int = MIN_BULLET_CHARS
+    max_bullet_chars: int = MAX_BULLET_CHARS
+    min_skill_groups: int = 3
+    max_skill_groups: int = 5
+
+
+class ApplicationPlan(BaseModel):
+    template: str
+    template_reason: str = ""
+    experience_ids: list[str] = Field(default_factory=list)
+    project_ids: list[str] = Field(default_factory=list)
+    skill_groups: list[SkillGroup] = Field(default_factory=list)
+    layout: LayoutBudget = Field(default_factory=LayoutBudget)
+    cover_letter: bool = True
+    cover_letter_source_ids: list[str] = Field(default_factory=list)
+    resume_priorities: list[str] = Field(default_factory=list)
+
+
+class PipelineMetrics(BaseModel):
+    experience_count: int = 0
+    project_count: int = 0
+    context_chars: int = 0
+    validation_failures: int = 0
+    bullet_rewrites: int = 0
+    cover_letter_repairs: int = 0
+    page_fit_attempts: int = 0
+    full_rewrites: int = 0
+    initial_resume_pages: int | None = None
+    final_resume_pages: int | None = None
+    initial_cover_pages: int | None = None
+    final_cover_pages: int | None = None
+    checker_escalated: bool = False
+    semantic_revisions: int = 0
 
 
 def overlong_answer_issues(result: ApplicationAnswersResult) -> list[str]:

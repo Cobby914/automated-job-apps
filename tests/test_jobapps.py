@@ -694,5 +694,390 @@ class WorkerClaimTests(unittest.TestCase):
         self.assertFalse(is_job_file(JOBS_DIR / "samples" / "stripe-backend.yaml"))
 
 
+class CareerBankTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from jobapps.career import load_career_bank
+
+        self.bank = load_career_bank(ROOT / "career")
+
+    def test_loads_profile_experiences_projects_skills(self) -> None:
+        self.assertEqual(self.bank.profile.contact.name, "Colin Kwon")
+        self.assertTrue(self.bank.profile.education)
+        ids = {item.id for item in self.bank.experiences}
+        self.assertEqual(
+            ids,
+            {"mk-lending", "tena", "fipet", "uci-scalesense", "commit-the-change"},
+        )
+        project_ids = {item.id for item in self.bank.projects}
+        self.assertIn("genome-sequencing", project_ids)
+        self.assertIn("unity-rl", project_ids)
+        self.assertIn("unix-shell", project_ids)
+
+    def test_source_ids_are_unique(self) -> None:
+        seen: set[str] = set()
+        for record in [*self.bank.experiences, *self.bank.projects]:
+            for source_id in record.source_ids():
+                self.assertNotIn(source_id, seen, source_id)
+                seen.add(source_id)
+        self.assertGreater(len(seen), 40)
+
+    def test_track_membership(self) -> None:
+        exp = self.bank.experience_by_id()
+        self.assertIn("ai", exp["uci-scalesense"].tracks)
+        self.assertNotIn("swe", exp["uci-scalesense"].tracks)
+        self.assertIn("swe", exp["fipet"].tracks)
+        self.assertNotIn("ai", exp["fipet"].tracks)
+        projects = self.bank.project_by_id()
+        self.assertIn("swe", projects["reel-in"].tracks)
+        self.assertNotIn("ai", projects["reel-in"].tracks)
+        self.assertIn("ai", projects["smart-step"].tracks)
+
+    def test_yaml_skills_whitelist(self) -> None:
+        allowed = self.bank.skills.allowed_names()
+        for name in ("python", "c/c++", "linux/unix", "pytorch", "carla", "posix", "canvas api"):
+            self.assertIn(name, allowed, name)
+        self.assertNotIn("kubernetes", allowed)
+
+
+class RankingAndPlanTests(unittest.TestCase):
+    def setUp(self) -> None:
+        from jobapps.career import load_career_bank
+
+        self.bank = load_career_bank(ROOT / "career")
+
+    def test_explicit_template_override(self) -> None:
+        from jobapps.ranking import select_template
+
+        job = Job(
+            company="Acme",
+            title="Backend Engineer",
+            description="Ship APIs.",
+            template="ai",
+        )
+        template, reason, auto = select_template(job)
+        self.assertEqual(template, "ai")
+        self.assertFalse(auto)
+        self.assertIn("explicitly", reason.lower())
+
+    def test_swe_job_scores_swe(self) -> None:
+        from jobapps.ranking import score_template
+
+        job = Job(
+            company="Stripe",
+            title="Backend Engineer",
+            description="Build REST APIs, PostgreSQL services, and TypeScript backends.",
+        )
+        template, _reason, scores = score_template(job)
+        self.assertEqual(template, "swe")
+        self.assertGreater(scores["swe"], scores["ai"])
+
+    def test_ai_job_scores_ai(self) -> None:
+        from jobapps.ranking import score_template
+
+        job = Job(
+            company="Nuro",
+            title="Autonomy Perception Intern",
+            description="PyTorch computer vision, CARLA simulation, radar-camera fusion research.",
+        )
+        template, _reason, scores = score_template(job)
+        self.assertEqual(template, "ai")
+        self.assertGreater(scores["ai"], scores["swe"])
+
+    def test_close_scores_default(self) -> None:
+        from jobapps.ranking import score_template
+
+        job = Job(company="Acme", title="Intern", description="Join our team.")
+        template, _reason, _scores = score_template(job)
+        self.assertEqual(template, "default")
+
+    def test_ranking_prefers_tech_overlap(self) -> None:
+        from jobapps.ranking import rank_experiences, rank_projects
+
+        job = Job(
+            company="Nuro",
+            title="Perception Engineer",
+            description="CARLA radar camera PyTorch multimodal perception autonomy.",
+            template="ai",
+        )
+        ranked = rank_experiences(job, self.bank, "ai")
+        self.assertEqual(ranked[0].record_id, "uci-scalesense")
+        projects = rank_projects(job, self.bank, "ai")
+        self.assertIn(
+            projects[0].record_id,
+            {"tumor-classification", "genome-sequencing", "smart-step", "unity-rl"},
+        )
+
+    def test_plan_respects_layout_budget(self) -> None:
+        from jobapps.plan import build_application_plan
+
+        job = Job(
+            company="Stripe",
+            title="Backend Engineer",
+            description="Python TypeScript PostgreSQL REST APIs Node.js.",
+        )
+        plan = build_application_plan(job, self.bank)
+        self.assertLessEqual(len(plan.experience_ids), plan.layout.max_experiences)
+        self.assertGreaterEqual(len(plan.experience_ids), plan.layout.min_experiences)
+        self.assertLessEqual(len(plan.project_ids), plan.layout.max_projects)
+        self.assertGreaterEqual(len(plan.project_ids), plan.layout.min_projects)
+        self.assertTrue(plan.skill_groups)
+        self.assertLessEqual(len(plan.skill_groups), plan.layout.max_skill_groups)
+        self.assertEqual(plan.template, "swe")
+        self.assertTrue(plan.cover_letter)
+
+    def test_skill_selection_never_invents(self) -> None:
+        from jobapps.models import Education as Edu
+        from jobapps.models import split_skill_items, unknown_skill_issues
+        from jobapps.ranking import select_skills
+
+        job = Job(
+            company="Acme",
+            title="Engineer",
+            description="Kubernetes, PyTorch, PostgreSQL, and React experience required.",
+        )
+        groups = select_skills(job, self.bank.skills, "swe")
+        allowed = self.bank.skills.allowed_names()
+        resume = TailoredResume(
+            experience=[],
+            education=[Edu(school="UCI", degree="BS")],
+            skills=groups,
+        )
+        self.assertEqual(unknown_skill_issues(resume, allowed), [])
+        names = [item for group in groups for item in split_skill_items(group.items)]
+        self.assertNotIn("Kubernetes", names)
+        self.assertTrue(any("PyTorch" in group.items for group in groups))
+
+
+class ValidateAndFitTests(unittest.TestCase):
+    def _resume(self, **kwargs: object) -> TailoredResume:
+        base: dict[str, object] = dict(
+            experience=[
+                Experience(company="Acme", role="Intern", bullets=["A" * 100, "B" * 100]),
+                Experience(company="Beta", role="Intern", bullets=["C" * 100, "D" * 100]),
+                Experience(company="Gamma", role="Intern", bullets=["E" * 100, "F" * 100]),
+            ],
+            projects=[
+                Project(
+                    name="Demo",
+                    bullets=["P" * 100, "Q" * 100, "Stack: Python"],
+                ),
+                Project(
+                    name="Other",
+                    bullets=["R" * 100, "S" * 100, "Stack: C"],
+                ),
+            ],
+            education=[
+                Education(
+                    school="University of California, Irvine",
+                    degree="B.S. Computer Science",
+                    year="June 2027",
+                )
+            ],
+            skills=[
+                SkillGroup(category="Languages", items="Python, TypeScript"),
+                SkillGroup(category="Backend/Data", items="PostgreSQL, REST APIs"),
+                SkillGroup(category="AI/ML", items="PyTorch, pandas"),
+            ],
+        )
+        base.update(kwargs)
+        return TailoredResume.model_validate(base)
+
+    def test_rejects_long_bullets_missing_stack_and_invented_skills(self) -> None:
+        from jobapps.career import load_career_bank
+        from jobapps.models import ApplicationPlan, LayoutBudget
+        from jobapps.validate import validate_resume
+
+        plan = ApplicationPlan(template="swe", layout=LayoutBudget())
+        resume = self._resume(
+            experience=[
+                Experience(
+                    company="Acme",
+                    role="Intern",
+                    bullets=["x" * (MAX_BULLET_CHARS + 1), "y" * 100],
+                ),
+                Experience(company="Beta", role="Intern", bullets=["C" * 100, "D" * 100]),
+                Experience(company="Gamma", role="Intern", bullets=["E" * 100, "F" * 100]),
+            ],
+            projects=[
+                Project(name="Demo", bullets=["P" * 100, "Q" * 100]),
+                Project(name="Other", bullets=["R" * 100, "S" * 100, "Stack: C"]),
+            ],
+            skills=[
+                SkillGroup(category="Cloud", items="AWS, Kubernetes"),
+                SkillGroup(category="Languages", items="Python"),
+                SkillGroup(category="AI/ML", items="PyTorch"),
+            ],
+        )
+        allowed = load_career_bank(ROOT / "career").skills.allowed_names()
+        issues = validate_resume(resume, plan, allowed)
+        self.assertTrue(any("chars" in item for item in issues))
+        self.assertTrue(any("Stack" in item for item in issues))
+        self.assertTrue(any("Kubernetes" in item for item in issues))
+
+    def test_cover_letter_paragraph_count(self) -> None:
+        from jobapps.validate import validate_cover_letter
+
+        thin = CoverLetter(
+            greeting="Dear Hiring Manager,",
+            paragraphs=["One", "Two"],
+            closing="Sincerely,",
+        )
+        issues = validate_cover_letter(thin)
+        self.assertTrue(any("at least 4" in item for item in issues))
+
+        ok = CoverLetter(
+            greeting="Dear Hiring Manager,",
+            paragraphs=["One", "Two", "Three", "Four"],
+            closing="Sincerely,",
+        )
+        self.assertEqual(validate_cover_letter(ok), [])
+
+    def test_parse_overfull_hbox(self) -> None:
+        from jobapps.fit import parse_overfull_hbox
+
+        log = r"Overfull \hbox (12.3pt too wide) in paragraph at lines 20--22"
+        self.assertEqual(parse_overfull_hbox(log), ["12.3pt"])
+
+    def test_python_trim_drops_lowest_priority_project_bullets_first(self) -> None:
+        from jobapps.fit import apply_python_trim
+        from jobapps.models import ApplicationPlan, LayoutBudget
+
+        plan = ApplicationPlan(
+            template="swe",
+            experience_ids=["acme", "beta", "gamma"],
+            project_ids=["demo", "other"],
+            resume_priorities=["acme", "beta", "gamma", "demo", "other"],
+            layout=LayoutBudget(project_bullets=2),
+        )
+        resume = self._resume(
+            projects=[
+                Project(
+                    name="Demo",
+                    bullets=["P" * 100, "Q" * 100, "T" * 100, "Stack: Python"],
+                ),
+                Project(
+                    name="Other",
+                    bullets=["R" * 100, "S" * 100, "U" * 100, "Stack: C"],
+                ),
+            ]
+        )
+        trimmed = apply_python_trim(resume, plan)
+        self.assertIsNotNone(trimmed)
+        assert trimmed is not None
+        other = next(item for item in trimmed.projects if item.name == "Other")
+        content = [b for b in other.bullets if not b.lower().startswith("stack:")]
+        self.assertEqual(len(content), 2)
+
+    def test_cover_letter_false_skips_cover_render(self) -> None:
+        from jobapps.latex import render_documents
+        from jobapps.models import load_resume
+
+        job = load_job(ROOT / "jobs" / "samples" / "stripe-backend.yaml")
+        job = job.model_copy(update={"cover_letter": False})
+        self.assertFalse(job.cover_letter)
+        resume = load_resume(ROOT / "resume_templates" / "swe.yaml")
+        tailored = TailoredResume(
+            summary=resume.summary,
+            experience=resume.experience[:3],
+            projects=resume.projects[:2],
+            education=resume.education,
+            skills=resume.skills,
+        )
+        with TemporaryDirectory() as tmp:
+            resume_tex, cover_tex = render_documents(
+                job,
+                resume.contact,
+                tailored,
+                None,
+                Path(tmp),
+                compile_pdf=False,
+            )
+            self.assertTrue(resume_tex.is_file())
+            self.assertIsNone(cover_tex)
+            self.assertFalse((Path(tmp) / "cover_letter.tex").exists())
+
+    def test_job_cover_letter_flag_parses(self) -> None:
+        with TemporaryDirectory() as tmp:
+            path = Path(tmp) / "job.yaml"
+            path.write_text(
+                "company: Acme\ntitle: Intern\ndescription: Build things.\ncover_letter: false\n",
+                encoding="utf-8",
+            )
+            job = load_job(path)
+        self.assertFalse(job.cover_letter)
+
+
+class CheckerEscalationTests(unittest.TestCase):
+    def test_sonnet_approve_skips_opus(self) -> None:
+        from jobapps.career import load_career_bank
+        from jobapps.generate import review_materials
+        from jobapps.plan import build_application_plan
+
+        bank = load_career_bank(ROOT / "career")
+        job = Job(
+            company="Stripe",
+            title="Backend Engineer",
+            description="Python TypeScript PostgreSQL REST APIs.",
+        )
+        plan = build_application_plan(job, bank)
+        resume = TailoredResume(
+            experience=[
+                Experience(
+                    company="M.K Lending",
+                    role="Software Engineer Intern",
+                    bullets=["x" * 100],
+                )
+            ],
+            projects=[Project(name="Canvas-Notion", bullets=["y" * 100, "Stack: Python"])],
+            education=bank.profile.education,
+            skills=plan.skill_groups,
+        )
+        with patch("jobapps.generate.cursor_checker_model", return_value="claude-4.5-sonnet"):
+            with patch("jobapps.generate.run_prompt") as mock_run:
+                mock_run.return_value = '{"approved": true, "summary": "Looks strong.", "issues": []}'
+                review, escalated, model = review_materials(job, plan, bank, resume, None)
+        self.assertTrue(review.approved)
+        self.assertFalse(escalated)
+        self.assertEqual(mock_run.call_count, 1)
+        self.assertEqual(model, "claude-4.5-sonnet")
+
+    def test_sonnet_reject_calls_opus(self) -> None:
+        from jobapps.career import load_career_bank
+        from jobapps.generate import review_materials
+        from jobapps.plan import build_application_plan
+
+        bank = load_career_bank(ROOT / "career")
+        job = Job(
+            company="Stripe",
+            title="Backend Engineer",
+            description="Python TypeScript PostgreSQL REST APIs.",
+        )
+        plan = build_application_plan(job, bank)
+        resume = TailoredResume(
+            experience=[
+                Experience(
+                    company="M.K Lending",
+                    role="Software Engineer Intern",
+                    bullets=["x" * 100],
+                )
+            ],
+            projects=[Project(name="Canvas-Notion", bullets=["y" * 100, "Stack: Python"])],
+            education=bank.profile.education,
+            skills=plan.skill_groups,
+        )
+        with patch("jobapps.generate.cursor_checker_model", return_value="claude-4.5-sonnet"):
+            with patch("jobapps.generate.cursor_escalation_model", return_value="claude-opus-5"):
+                with patch("jobapps.generate.run_prompt") as mock_run:
+                    mock_run.side_effect = [
+                        '{"approved": false, "summary": "Too generic.", "issues": ["Cliches"]}',
+                        '{"approved": true, "summary": "Acceptable after scrutiny.", "issues": []}',
+                    ]
+                    review, escalated, model = review_materials(job, plan, bank, resume, None)
+        self.assertTrue(review.approved)
+        self.assertTrue(escalated)
+        self.assertEqual(mock_run.call_count, 2)
+        self.assertEqual(model, "claude-opus-5")
+
+
 if __name__ == "__main__":
     unittest.main()

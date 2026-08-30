@@ -1,0 +1,411 @@
+- id: genome-sequencing
+  name: Genome Sequencing
+  url: ""
+  tracks: [swe, ai, default]
+  tags: [ml, data-pipeline, research, classification]
+  domains: [bioinformatics, machine-learning]
+  technologies:
+    - Python
+    - DuckDB
+    - pandas
+    - PyTorch
+    - scikit-learn
+    - Matplotlib
+  stack: Python, DuckDB, pandas, PyTorch, scikit-learn
+  summary: >
+    Built a machine-learning and data-engineering pipeline for genetic variant
+    classification using Python, DuckDB, pandas, PyTorch, and scikit-learn.
+    Combined the Humsavar and dbNSFP 5.3a datasets, then trained neural-network
+    classification models. Improving the dataset and feature pipeline raised
+    downstream F1 substantially without relying only on architecture changes.
+  facts:
+    - id: genome-sequencing.fact.1
+      text: Built a machine-learning and data-engineering pipeline for genetic variant classification using Python, DuckDB, pandas, PyTorch, and scikit-learn.
+    - id: genome-sequencing.fact.2
+      text: Combined the Humsavar and dbNSFP 5.3a datasets with joining, transformation, preprocessing, and exploratory analysis.
+    - id: genome-sequencing.fact.3
+      text: Trained neural-network classification models on the resulting dataset.
+    - id: genome-sequencing.fact.4
+      text: Demonstrated that improving the underlying dataset and feature pipeline could materially improve downstream model performance rather than relying solely on architecture changes.
+  metrics:
+    - id: genome-sequencing.metric.1
+      text: Improved model F1 from approximately 0.40 to 0.70.
+  bullets:
+    - id: genome-sequencing.bullet.1
+      text: Constructed a pipeline conjoining Humsavar and dbNSFP using DuckDB and pandas, improving F1 scores by 70%.
+      sources: [genome-sequencing.fact.2, genome-sequencing.metric.1]
+    - id: genome-sequencing.bullet.2
+      text: Contributed data exploration using seaborn, pandas, and Matplotlib, increasing data readability for model tuning.
+      sources: [genome-sequencing.fact.2]
+    - id: genome-sequencing.bullet.3
+      text: Developed a neural network learner using Python, PyTorch, pandas, and scikit-learn with roughly 70% F1 score.
+      sources: [genome-sequencing.fact.3, genome-sequencing.metric.1]
+    - id: genome-sequencing.bullet.4
+      text: "Stack: Python, DuckDB, pandas, PyTorch, scikit-learn."
+      sources: []
+
+- id: tumor-classification
+  name: Tumor Classification based Scans
+  url: ""
+  tracks: [swe, ai, default]
+  tags: [ml, computer-vision, explainability, medical]
+  domains: [healthcare, machine-learning]
+  technologies:
+    - Python
+    - PyTorch
+    - scikit-learn
+    - pandas
+    - Matplotlib
+    - Grad-CAM
+    - Deep Learning
+    - Computer Vision
+  stack: Python, PyTorch, scikit-learn, pandas
+  summary: >
+    Developed a deep-learning pipeline for classifying tumors from medical scan
+    data using Python, PyTorch, scikit-learn, and pandas. Built a residual
+    neural-network architecture, ran systematic hyperparameter/grid-search
+    experimentation, and implemented Grad-CAM to inspect which image regions
+    influenced predictions.
+  facts:
+    - id: tumor-classification.fact.1
+      text: Developed a deep-learning pipeline for classifying tumors from medical scan data using Python, PyTorch, scikit-learn, and pandas.
+    - id: tumor-classification.fact.2
+      text: Built a residual neural-network architecture and performed systematic hyperparameter experimentation.
+    - id: tumor-classification.fact.3
+      text: Implemented Grad-CAM to investigate which portions of medical images influenced model predictions.
+  metrics:
+    - id: tumor-classification.metric.1
+      text: Achieved approximately 99% F1.
+    - id: tumor-classification.metric.2
+      text: Model optimization improved performance approximately 30%.
+    - id: tumor-classification.metric.3
+      text: Grad-CAM analysis reached approximately 0.67 correlation.
+  bullets:
+    - id: tumor-classification.bullet.1
+      text: Created a residual neural network using scikit-learn, PyTorch, and Python with an F1 score of roughly 99%.
+      sources: [tumor-classification.fact.2, tumor-classification.metric.1]
+    - id: tumor-classification.bullet.2
+      text: Implemented a grid search using pandas, Matplotlib, and PyTorch, optimizing the residual network by 30%.
+      sources: [tumor-classification.fact.2, tumor-classification.metric.2]
+    - id: tumor-classification.bullet.3
+      text: Implemented Grad-CAM for the residual neural network using PyTorch, reaching a spatial correlation of 0.67.
+      sources: [tumor-classification.fact.3, tumor-classification.metric.3]
+    - id: tumor-classification.bullet.4
+      text: "Stack: Python, PyTorch, scikit-learn, pandas."
+      sources: []
+
+- id: canvas-notion
+  name: Canvas-Notion
+  url: ""
+  tracks: [swe, ai, default]
+  tags: [automation, apis, data-pipeline, backend]
+  domains: [productivity, education]
+  technologies:
+    - Python
+    - Canvas API
+    - Notion API
+    - GitHub Actions
+    - REST APIs
+  stack: Python, Canvas API, Notion API, GitHub Actions
+  summary: >
+    Built a Python synchronization engine that automatically transfers assignments
+    and task information from Canvas LMS into Notion. Integrated both REST APIs,
+    added heuristics for task priority and effort, implemented idempotent sync
+    using Canvas Assignment IDs, and scheduled runs with GitHub Actions.
+  facts:
+    - id: canvas-notion.fact.1
+      text: Built a Python synchronization engine that automatically transfers assignments and task information from Canvas LMS into Notion.
+    - id: canvas-notion.fact.2
+      text: Integrated the Canvas and Notion REST APIs and created a metadata-processing pipeline that translated assignment information into Notion tasks.
+    - id: canvas-notion.fact.3
+      text: Added custom heuristics for estimating task priority and effort.
+    - id: canvas-notion.fact.4
+      text: Implemented idempotent synchronization using Canvas Assignment IDs so repeated executions updated existing tasks rather than producing duplicates.
+    - id: canvas-notion.fact.5
+      text: Used GitHub Actions to automate execution so the synchronization workflow could run without manual intervention.
+  metrics: []
+  bullets:
+    - id: canvas-notion.bullet.1
+      text: Made a Python sync engine to automate Canvas-to-Notion task tracking, using REST APIs and GitHub Actions.
+      sources: [canvas-notion.fact.1, canvas-notion.fact.5]
+    - id: canvas-notion.bullet.2
+      text: Engineered metadata transformation pipeline to calculate task priority and effort using custom heuristics.
+      sources: [canvas-notion.fact.2, canvas-notion.fact.3]
+    - id: canvas-notion.bullet.3
+      text: Implemented idempotent logic with Canvas Assignment IDs to ensure consistency and prevent duplicate entries.
+      sources: [canvas-notion.fact.4]
+    - id: canvas-notion.bullet.4
+      text: "Stack: Python, Canvas API, Notion API, GitHub Actions."
+      sources: []
+
+- id: reel-in
+  name: Reel In
+  url: ""
+  tracks: [swe, default]
+  tags: [fullstack, frontend, backend, student]
+  domains: [education, web]
+  technologies:
+    - JavaScript
+    - TypeScript
+    - CSS
+    - React
+    - PostgreSQL
+    - REST APIs
+  stack: JavaScript, TypeScript, CSS, React, PostgreSQL
+  summary: >
+    Developed a collaborative full-stack platform for helping university students
+    discover projects, using React, JavaScript, TypeScript, CSS, REST APIs, and
+    PostgreSQL. Built project-page APIs and reusable frontend components including
+    navigation, modals, and cards.
+  facts:
+    - id: reel-in.fact.1
+      text: Developed a collaborative full-stack platform for helping university students discover projects.
+    - id: reel-in.fact.2
+      text: Worked with React, JavaScript, TypeScript, CSS, REST APIs, and PostgreSQL to implement project-page functionality and reusable frontend components.
+    - id: reel-in.fact.3
+      text: Built interface elements including navigation components, modals, and cards that were reused across the application by other developers.
+  metrics:
+    - id: reel-in.metric.1
+      text: Platform used by approximately 50 students.
+    - id: reel-in.metric.2
+      text: Components reused by 5+ developers.
+  bullets:
+    - id: reel-in.bullet.1
+      text: Developed a full-stack platform for students to find projects using JavaScript, TypeScript, CSS, and React.
+      sources: [reel-in.fact.1, reel-in.fact.2]
+    - id: reel-in.bullet.2
+      text: Created REST API routes for project pages using PostgreSQL, React, and JavaScript, increasing use by 50%.
+      sources: [reel-in.fact.2, reel-in.metric.1]
+    - id: reel-in.bullet.3
+      text: Implemented navbar, modals, and cards using React and CSS, reused by 5+ developers across the project team.
+      sources: [reel-in.fact.3, reel-in.metric.2]
+    - id: reel-in.bullet.4
+      text: "Stack: JavaScript, TypeScript, CSS, React, PostgreSQL."
+      sources: []
+
+- id: smart-step
+  name: Smart Step
+  url: ""
+  tracks: [ai, default]
+  tags: [embedded, sensors, assistive, hardware, cloud]
+  domains: [embedded, accessibility, iot]
+  technologies:
+    - C
+    - PlatformIO
+    - Arduino
+    - ESP32
+    - AWS
+    - Ultrasonic Sensors
+    - Time-of-Flight Sensors
+    - Sensor Integration
+  stack: C, PlatformIO, Arduino, ESP32, AWS
+  summary: >
+    Developed an assistive embedded system to help visually impaired users detect
+    obstacles and elevation changes using C, PlatformIO, Arduino/ESP32, ultrasonic
+    and time-of-flight sensors, and AWS. Processed sensor readings to trigger
+    buzzer feedback and relayed data from the ESP32 to AWS for a Bluetooth/voice
+    feature. Debugged physical hardware directly.
+  facts:
+    - id: smart-step.fact.1
+      text: Developed an assistive embedded system designed to help visually impaired users detect obstacles and elevation changes.
+    - id: smart-step.fact.2
+      text: Built the device using C, PlatformIO, Arduino/ESP32, ultrasonic sensors, time-of-flight sensing, and AWS.
+    - id: smart-step.fact.3
+      text: Sensor readings were processed to identify incoming objects and terrain changes and trigger feedback for the user.
+    - id: smart-step.fact.4
+      text: Worked directly with physical hardware debugging and developed cloud/Bluetooth functionality through the ESP32.
+  metrics:
+    - id: smart-step.metric.1
+      text: Approximately 80% obstacle/elevation detection accuracy.
+    - id: smart-step.metric.2
+      text: Approximately 90% accuracy for the Bluetooth/voice feature.
+  bullets:
+    - id: smart-step.bullet.1
+      text: Created a smart white cane detecting elevation changes and incoming objects using T.O.F and ultrasonic sensors.
+      sources: [smart-step.fact.1, smart-step.fact.2]
+    - id: smart-step.bullet.2
+      text: Developed a buzzer feedback system for blind and deaf users from sensor inputs with low-latency physical testing.
+      sources: [smart-step.fact.3]
+    - id: smart-step.bullet.3
+      text: Relayed data from ESP32 to AWS cloud for a Bluetooth voice feature with approximately 90% accuracy in trials.
+      sources: [smart-step.fact.4, smart-step.metric.2]
+    - id: smart-step.bullet.4
+      text: "Stack: C, PlatformIO, Arduino, ESP32, AWS."
+      sources: []
+
+- id: personal-website
+  name: Personal Website
+  url: https://colinkwon914.com/
+  tracks: [default]
+  tags: [frontend, portfolio]
+  domains: [web]
+  technologies:
+    - Next.js
+    - React
+    - Zustand
+    - Radix UI
+  stack: Next.js, React, Tailwind CSS, Zustand, Radix UI
+  summary: >
+    Built a personal software-engineering portfolio using Next.js, React, Zustand,
+    and Radix UI as a production-facing showcase for software, research, and
+    engineering work.
+  facts:
+    - id: personal-website.fact.1
+      text: Built a personal software-engineering portfolio using Next.js, React, Zustand, and Radix UI.
+    - id: personal-website.fact.2
+      text: Implemented persistent light/dark theme state with Zustand and localStorage alongside responsive navigation.
+  metrics: []
+  bullets:
+    - id: personal-website.bullet.1
+      text: Built and deployed a responsive portfolio using Next.js 14, React, Tailwind CSS, Zustand, and Radix UI.
+      sources: [personal-website.fact.1]
+    - id: personal-website.bullet.2
+      text: Implemented persistent light/dark theme state with Zustand and localStorage alongside responsive navigation.
+      sources: [personal-website.fact.2]
+    - id: personal-website.bullet.3
+      text: "Stack: Next.js, React, Tailwind CSS, Zustand, Radix UI."
+      sources: []
+
+- id: unity-rl
+  name: Unity Reinforcement Learning
+  url: ""
+  tracks: []
+  tags: [rl, simulation, ml, games]
+  domains: [reinforcement-learning, simulation]
+  technologies:
+    - Unity
+    - Unity ML-Agents
+    - PPO
+    - C#
+    - TensorBoard
+    - Reinforcement Learning
+  stack: Unity ML-Agents, PPO, C#, TensorBoard
+  summary: >
+    Built and trained a physics-based reinforcement-learning agent using Unity
+    ML-Agents, PPO, C#, and TensorBoard. Used curriculum learning from balance
+    through locomotion, target navigation, block pushing, and self-play. Diagnosed
+    reward hacking such as sliding and crawling, and iterated rewards until
+    locomotion stabilized.
+  facts:
+    - id: unity-rl.fact.1
+      text: Built and trained a physics-based reinforcement-learning agent using Unity ML-Agents, PPO, C#, and TensorBoard.
+    - id: unity-rl.fact.2
+      text: Used curriculum learning progressing through balance, locomotion, target navigation, block pushing, and opponent/self-play.
+    - id: unity-rl.fact.3
+      text: Worked with a ragdoll-like agent containing numerous independently controlled joints and a large continuous observation/action space.
+    - id: unity-rl.fact.4
+      text: Diagnosed reward hacking including sliding, crawling, falling sideways, and other strategies that increased reward while failing intended locomotion.
+  metrics:
+    - id: unity-rl.metric.1
+      text: Controlled approximately 16 articulated joints.
+    - id: unity-rl.metric.2
+      text: Stable locomotion required 45M+ training steps.
+    - id: unity-rl.metric.3
+      text: Later self-play experimentation ran for approximately 25M steps.
+  bullets:
+    - id: unity-rl.bullet.1
+      text: Refined PPO rewards for a Unity humanoid agent controlling 16 articulated joints.
+      sources: [unity-rl.fact.1, unity-rl.metric.1]
+    - id: unity-rl.bullet.2
+      text: Integrated joint rotations, velocities, targets, and arena boundaries into RL observations.
+      sources: [unity-rl.fact.3]
+    - id: unity-rl.bullet.3
+      text: Diagnosed crawling, sliding, and balancing reward hacks during PPO training.
+      sources: [unity-rl.fact.4]
+    - id: unity-rl.bullet.4
+      text: Contributed to stable locomotion after 45M+ Unity ML-Agents training steps.
+      sources: [unity-rl.metric.2]
+    - id: unity-rl.bullet.5
+      text: Trained self-play policies for approximately 25M additional environment steps.
+      sources: [unity-rl.metric.3]
+    - id: unity-rl.bullet.6
+      text: Analyzed training behavior with TensorBoard to identify reward and locomotion failures.
+      sources: [unity-rl.fact.1]
+    - id: unity-rl.bullet.7
+      text: "Stack: Unity ML-Agents, PPO, C#, TensorBoard."
+      sources: []
+
+- id: unix-shell
+  name: Unix Shell
+  url: ""
+  tracks: []
+  tags: [systems, c, os, posix]
+  domains: [systems, operating-systems]
+  technologies:
+    - C
+    - POSIX
+    - Linux/Unix
+    - Operating Systems
+    - Process Management
+    - I/O Redirection
+  stack: C, POSIX, Linux
+  summary: >
+    Built a Unix-like command shell in C using low-level POSIX/Linux functionality
+    including fork, exec, wait, pipe, dup2, signals, file descriptors, I/O
+    redirection, and multi-process pipelines, with correct child-process cleanup.
+  facts:
+    - id: unix-shell.fact.1
+      text: Built a Unix-like command shell in C using low-level POSIX/Linux functionality.
+    - id: unix-shell.fact.2
+      text: Implemented process creation and management using fork, exec, wait, pipe, dup2, signals, file descriptors, input/output redirection, and multi-process pipelines.
+    - id: unix-shell.fact.3
+      text: Managed parent/child process behavior, connected command pipelines through file descriptors, redirected standard input/output, and cleaned up child processes.
+  metrics: []
+  bullets:
+    - id: unix-shell.bullet.1
+      text: Built a Unix shell in C using fork, exec, wait, and pipe for command execution.
+      sources: [unix-shell.fact.1, unix-shell.fact.2]
+    - id: unix-shell.bullet.2
+      text: Implemented I/O redirection with dup2 and managed parent/child file descriptors.
+      sources: [unix-shell.fact.3]
+    - id: unix-shell.bullet.3
+      text: Added multi-process pipelines by connecting commands through Unix pipes.
+      sources: [unix-shell.fact.2]
+    - id: unix-shell.bullet.4
+      text: Handled signals, invalid commands, and child-process cleanup for reliable execution.
+      sources: [unix-shell.fact.3]
+    - id: unix-shell.bullet.5
+      text: "Stack: C, POSIX, Linux."
+      sources: []
+
+- id: emg-robotic-arm
+  name: EMG-Controlled Robotic Arm
+  url: ""
+  tracks: []
+  tags: [ml, embedded, robotics, signal-processing, in-progress]
+  domains: [robotics, machine-learning, embedded]
+  technologies:
+    - Python
+    - PyTorch
+    - Unity
+  stack: Python, PyTorch, Unity, EMG
+  summary: >
+    In-progress ML-driven control system that converts forearm electromyography
+    (EMG) signals into robotic-arm movement commands. Pipeline resembles EMG
+    acquisition → filtering → windowing/features → ML classification → movement
+    command, with Python/PyTorch for learning and Unity simulation before hardware
+    deployment. No performance metrics yet.
+  facts:
+    - id: emg-robotic-arm.fact.1
+      text: Developing an ML-driven control system that converts forearm electromyography (EMG) signals into robotic-arm movement commands.
+    - id: emg-robotic-arm.fact.2
+      text: Processes raw multichannel EMG through acquisition, signal filtering, windowing/features, ML classification, and movement commands.
+    - id: emg-robotic-arm.fact.3
+      text: Using Python/PyTorch for the learning pipeline and exploring simulation-based testing in Unity before full hardware deployment.
+  metrics: []
+  bullets:
+    - id: emg-robotic-arm.bullet.1
+      text: Developing an EMG pipeline that maps forearm muscle signals to robotic-arm commands.
+      sources: [emg-robotic-arm.fact.1]
+    - id: emg-robotic-arm.bullet.2
+      text: Building signal-processing and PyTorch classification workflows for EMG gesture recognition.
+      sources: [emg-robotic-arm.fact.2]
+    - id: emg-robotic-arm.bullet.3
+      text: Using simulation to evaluate arm-control accuracy and stability before hardware deployment.
+      sources: [emg-robotic-arm.fact.3]
+    - id: emg-robotic-arm.bullet.4
+      text: Designing gesture-to-motion mappings for eventual transfer to a physical robotic arm.
+      sources: [emg-robotic-arm.fact.1]
+    - id: emg-robotic-arm.bullet.5
+      text: "Stack: Python, PyTorch, Unity, EMG."
+      sources: []

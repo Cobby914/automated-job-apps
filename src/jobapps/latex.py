@@ -168,7 +168,8 @@ def ensure_latex_tools() -> None:
         )
 
 
-def compile_tex(tex_path: Path) -> Path:
+def compile_tex_with_log(tex_path: Path) -> tuple[Path, str]:
+    """Compile a .tex file and return (pdf_path, log_text) before aux cleanup."""
     ensure_latex_tools()
     env = os.environ.copy()
     env["PATH"] = _tex_search_path()
@@ -188,11 +189,14 @@ def compile_tex(tex_path: Path) -> Path:
         check=False,
     )
     pdf_path = tex_path.with_suffix(".pdf")
+    log_path = tex_path.with_suffix(".log")
+    log_text = ""
+    if log_path.is_file():
+        log_text = log_path.read_text(encoding="utf-8", errors="replace")
     if result.returncode != 0 or not pdf_path.is_file():
-        log_path = tex_path.with_suffix(".log")
         details = result.stderr.strip() or result.stdout.strip()
-        if log_path.is_file():
-            details = log_path.read_text(encoding="utf-8", errors="replace")[-4000:]
+        if log_text:
+            details = log_text[-4000:]
         raise RuntimeError(f"LaTeX compile failed for {tex_path.name}:\n{details}")
     subprocess.run(
         ["latexmk", "-c", tex_path.name],
@@ -201,6 +205,11 @@ def compile_tex(tex_path: Path) -> Path:
         capture_output=True,
         check=False,
     )
+    return pdf_path, log_text
+
+
+def compile_tex(tex_path: Path) -> Path:
+    pdf_path, _log = compile_tex_with_log(tex_path)
     return pdf_path
 
 
@@ -264,28 +273,23 @@ def render_documents(
     job: Job,
     contact: Contact,
     resume: TailoredResume,
-    cover: CoverLetter,
+    cover: CoverLetter | None,
     output_dir: Path,
     template_name: str = "default",
     compile_pdf: bool = True,
-) -> tuple[Path, Path]:
+) -> tuple[Path, Path | None]:
     output_dir.mkdir(parents=True, exist_ok=True)
     resume_template = _resolve_template(RESUME_TEMPLATES_DIR, template_name)
-    cover_template = _resolve_template(COVER_LETTER_TEMPLATES_DIR, template_name)
     if not (RESUME_TEMPLATES_DIR / resume_template).is_file():
         raise FileNotFoundError(f"Missing resume template: {RESUME_TEMPLATES_DIR / resume_template}")
-    if not (COVER_LETTER_TEMPLATES_DIR / cover_template).is_file():
-        raise FileNotFoundError(
-            f"Missing cover letter template: {COVER_LETTER_TEMPLATES_DIR / cover_template}"
-        )
 
     context = {
         "contact": _contact_context(contact),
         "resume": _resume_context(resume),
         "cover": {
-            "greeting": escape_latex(cover.greeting),
-            "paragraphs": [escape_latex(paragraph) for paragraph in cover.paragraphs],
-            "closing": escape_latex(cover.closing),
+            "greeting": escape_latex(cover.greeting) if cover else "",
+            "paragraphs": [escape_latex(paragraph) for paragraph in cover.paragraphs] if cover else [],
+            "closing": escape_latex(cover.closing) if cover else "",
         },
         "job": {
             "company": escape_latex(job.company),
@@ -294,13 +298,21 @@ def render_documents(
     }
 
     resume_tex = output_dir / "resume.tex"
-    cover_tex = output_dir / "cover_letter.tex"
     resume_tex.write_text(_jinja(RESUME_TEMPLATES_DIR).get_template(resume_template).render(**context), encoding="utf-8")
-    cover_tex.write_text(
-        _jinja(COVER_LETTER_TEMPLATES_DIR).get_template(cover_template).render(**context),
-        encoding="utf-8",
-    )
+    cover_tex: Path | None = None
+    if cover is not None:
+        cover_template = _resolve_template(COVER_LETTER_TEMPLATES_DIR, template_name)
+        if not (COVER_LETTER_TEMPLATES_DIR / cover_template).is_file():
+            raise FileNotFoundError(
+                f"Missing cover letter template: {COVER_LETTER_TEMPLATES_DIR / cover_template}"
+            )
+        cover_tex = output_dir / "cover_letter.tex"
+        cover_tex.write_text(
+            _jinja(COVER_LETTER_TEMPLATES_DIR).get_template(cover_template).render(**context),
+            encoding="utf-8",
+        )
     if compile_pdf:
         compile_tex(resume_tex)
-        compile_tex(cover_tex)
+        if cover_tex is not None:
+            compile_tex(cover_tex)
     return resume_tex, cover_tex
