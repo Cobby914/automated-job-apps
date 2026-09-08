@@ -28,6 +28,7 @@ def find_root() -> Path:
 
 
 ROOT = find_root()
+DEFAULT_POLL_SECONDS = 2.0
 JOBS_DIR = ROOT / "jobs"
 PROCESSED_DIR = JOBS_DIR / "processed"
 SAMPLES_DIR = JOBS_DIR / "samples"

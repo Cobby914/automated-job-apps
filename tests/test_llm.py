@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import json
 import os
+import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -12,6 +14,9 @@ from jobapps.career import load_career_bank
 from jobapps.config import openai_reasoning_effort
 from jobapps.generate import review_materials
 from jobapps.llm import (
+    _complete_cursor,
+    _patch_cursor_windows_bridge,
+    _read_cursor_bridge_discovery,
     anthropic_model_id,
     begin_usage_collection,
     estimate_cost_usd,
@@ -258,6 +263,71 @@ class CheckerEscalationTests(unittest.TestCase):
         self.assertTrue(escalated)
         self.assertEqual(mock_run.call_count, 2)
         self.assertEqual(model, "claude-opus-5")
+
+
+class CursorWindowsBridgeTests(unittest.TestCase):
+    def test_poll_discovery_parses_ready_line(self) -> None:
+        payload = {
+            "schemaVersion": 1,
+            "transport": "tcp",
+            "protocol": "connect",
+            "url": "http://127.0.0.1:9",
+            "authToken": "tok",
+            "pid": 1,
+        }
+        line = "cursor-sdk-bridge ready " + json.dumps(payload) + "\n"
+        code = (
+            "import os, sys, time;"
+            "sys.stderr.write(os.environ['DISC']);"
+            "sys.stderr.flush();"
+            "time.sleep(5)"
+        )
+        env = os.environ.copy()
+        env["DISC"] = line
+        proc = subprocess.Popen(
+            [sys.executable, "-c", code],
+            stderr=subprocess.PIPE,
+            env=env,
+        )
+        try:
+            discovery = _read_cursor_bridge_discovery(proc, timeout=5)
+            self.assertEqual(discovery["url"], "http://127.0.0.1:9")
+            self.assertEqual(discovery["authToken"], "tok")
+        finally:
+            proc.kill()
+            proc.wait(timeout=5)
+            if proc.stderr is not None:
+                proc.stderr.close()
+
+    def test_complete_cursor_applies_windows_bridge_patch(self) -> None:
+        result = MagicMock()
+        result.status = "finished"
+        result.result = "pong"
+        with patch.dict(os.environ, {"CURSOR_API_KEY": "crsr_test"}, clear=False):
+            with patch("jobapps.llm._patch_cursor_windows_bridge") as apply_patch:
+                with patch("cursor_sdk.Agent.prompt", return_value=result) as prompt:
+                    text = _complete_cursor("", "ping", "composer-2.5", "cursor_ping")
+        apply_patch.assert_called_once()
+        prompt.assert_called_once()
+        self.assertEqual(text, "pong")
+
+    def test_windows_bridge_patch_is_idempotent(self) -> None:
+        import jobapps.llm as llm_mod
+        from cursor_sdk import _bridge
+
+        original = _bridge._read_discovery
+        previous = llm_mod._CURSOR_WINDOWS_BRIDGE_PATCHED
+        try:
+            llm_mod._CURSOR_WINDOWS_BRIDGE_PATCHED = False
+            with patch.object(llm_mod.os, "name", "nt"):
+                _patch_cursor_windows_bridge()
+                first = _bridge._read_discovery
+                _patch_cursor_windows_bridge()
+                self.assertIs(first, _read_cursor_bridge_discovery)
+                self.assertIs(_bridge._read_discovery, first)
+        finally:
+            _bridge._read_discovery = original
+            llm_mod._CURSOR_WINDOWS_BRIDGE_PATCHED = previous
 
 
 if __name__ == "__main__":

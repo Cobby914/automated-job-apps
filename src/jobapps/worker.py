@@ -7,12 +7,11 @@ import os
 import time
 from pathlib import Path
 
-from jobapps.config import JOBS_DIR, PROCESSED_DIR, load_env
+from jobapps.config import DEFAULT_POLL_SECONDS, JOBS_DIR, PROCESSED_DIR, load_env
 from jobapps.jobs_util import is_job_file, list_job_files
 from jobapps.latex import ensure_latex_tools
 from jobapps.pipeline import run_job_file
 
-DEFAULT_POLL_SECONDS = 2.0
 
 
 def try_claim(path: Path) -> int | None:

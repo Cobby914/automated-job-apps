@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
+import codecs
 import json
 import os
 import random
 import re
 import time
+from collections.abc import Mapping
 from contextvars import ContextVar
 from datetime import datetime, timedelta
-from typing import TypeVar
+from typing import Any, TypeVar
 
 from pydantic import BaseModel
 
@@ -487,6 +489,88 @@ def _complete_anthropic(system: str, user: str, model: str, cache_system: bool, 
     return text
 
 
+_CURSOR_WINDOWS_BRIDGE_PATCHED = False
+
+
+def _read_cursor_bridge_discovery(process: object, timeout: float) -> Mapping[str, Any]:
+    """Poll bridge stderr instead of select(). Windows select() rejects pipes."""
+    from cursor_sdk._bridge import parse_discovery_line
+    from cursor_sdk.errors import CursorSDKError
+
+    stderr = getattr(process, "stderr", None)
+    if stderr is None:
+        raise CursorSDKError("Bridge process stderr is unavailable")
+    stderr_fd = stderr.fileno()
+    try:
+        was_blocking = os.get_blocking(stderr_fd)
+        os.set_blocking(stderr_fd, False)
+    except (AttributeError, OSError, ValueError):
+        was_blocking = True
+    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
+    deadline = time.monotonic() + timeout
+    stderr_lines: list[str] = []
+    pending = ""
+    try:
+        while time.monotonic() < deadline:
+            while True:
+                try:
+                    chunk = os.read(stderr_fd, 8192)
+                except BlockingIOError:
+                    break
+                except OSError:
+                    break
+                if not chunk:
+                    final_text = decoder.decode(b"", final=True)
+                    if final_text:
+                        pending += final_text
+                    if pending:
+                        line = pending
+                        pending = ""
+                        stderr_lines.append(line)
+                        discovery = parse_discovery_line(line)
+                        if discovery is not None:
+                            return discovery
+                    break
+                pending += decoder.decode(chunk)
+                while "\n" in pending:
+                    line, pending = pending.split("\n", 1)
+                    line += "\n"
+                    stderr_lines.append(line)
+                    discovery = parse_discovery_line(line)
+                    if discovery is not None:
+                        return discovery
+            exit_code = process.poll()  # type: ignore[attr-defined]
+            if exit_code is not None:
+                discovery = None
+                if pending:
+                    discovery = parse_discovery_line(pending)
+                if discovery is not None:
+                    return discovery
+                raise CursorSDKError(
+                    f"Bridge exited before discovery with status {exit_code}: "
+                    + "".join(stderr_lines)
+                    + pending
+                )
+            time.sleep(0.05)
+        raise CursorSDKError("Timed out waiting for bridge discovery")
+    finally:
+        try:
+            os.set_blocking(stderr_fd, was_blocking)
+        except Exception:
+            pass
+
+
+def _patch_cursor_windows_bridge() -> None:
+    """cursor-sdk's local bridge uses select() on a pipe; that raises WinError 10038."""
+    global _CURSOR_WINDOWS_BRIDGE_PATCHED
+    if os.name != "nt" or _CURSOR_WINDOWS_BRIDGE_PATCHED:
+        return
+    from cursor_sdk import _bridge
+
+    _bridge._read_discovery = _read_cursor_bridge_discovery
+    _CURSOR_WINDOWS_BRIDGE_PATCHED = True
+
+
 def _complete_cursor(system: str, user: str, model: str, purpose: str) -> str:
     try:
         from cursor_sdk import Agent, AgentOptions, CursorAgentError, LocalAgentOptions
@@ -494,6 +578,7 @@ def _complete_cursor(system: str, user: str, model: str, purpose: str) -> str:
         raise ProviderError("cursor-sdk is required for the Cursor LLM provider.") from error
     from jobapps.config import ROOT
 
+    _patch_cursor_windows_bridge()
     prompt = f"{system.rstrip()}\n\n{user}" if system.strip() else user
     started = time.perf_counter()
     try:

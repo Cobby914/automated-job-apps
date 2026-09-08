@@ -3,14 +3,14 @@
 from __future__ import annotations
 
 import argparse
+import os
 import sys
 from pathlib import Path
 
-from jobapps.config import load_env
+from jobapps.config import DEFAULT_POLL_SECONDS, load_env
 from jobapps.notion import create_database
 from jobapps.pipeline import run_job_file
 from jobapps.watch import watch
-from jobapps.worker import DEFAULT_POLL_SECONDS, worker_loop
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -59,6 +59,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Wrote {result.output_dir}")
         return 0
     if args.command == "worker":
+        if os.name == "nt":
+            parser.error("worker requires Linux/Docker; use watch or process on Windows")
+        from jobapps.worker import worker_loop
+
         worker_loop(poll_seconds=args.poll, worker_id=args.worker_id)
         return 0
     if args.command == "setup-notion":
