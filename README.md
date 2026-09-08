@@ -100,7 +100,8 @@ Optional: `template: auto` (default) scores the job description with token/phras
 
 Set `cover_letter: false` to skip cover-letter generation, review, and PDF.
 
-Graduation date is either **June 2027** or **Dec. 2027**, chosen from when the role starts. Optional fields:
+Graduation date is either **June 2027** or **Dec. 2027**. New-grad roles use June;
+other roles starting in Summer 2027 or later use December. Optional fields:
 
 ```yaml
 starts: Summer 2027

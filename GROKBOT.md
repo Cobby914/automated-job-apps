@@ -77,7 +77,7 @@ mv jobs/_acme-swe.yaml jobs/acme-swe.yaml
 | `portal_url` | Application link |
 | `notes` | Anything useful for the writer (referral context, location, etc.) |
 | `template` | `auto` (default), `swe`, `ai`, or `default` |
-| `starts` | e.g. `Summer 2027`, `Fall 2027`, `2027-09` — used to pick graduation |
+| `starts` | e.g. `Summer 2027`, `Fall 2027`, `2027-09` — Summer 2027 or later uses December unless it is a new-grad role |
 | `graduation` | Force `June 2027` or `Dec. 2027` (overrides inference) |
 | `questions` | Screening prompts; each needs `prompt`, optional `max_length` |
 

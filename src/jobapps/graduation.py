@@ -11,9 +11,15 @@ GRADUATION_JUNE = "June 2027"
 GRADUATION_DEC = "Dec. 2027"
 ALLOWED_GRADUATION_DATES = frozenset({GRADUATION_JUNE, GRADUATION_DEC})
 
-# Roles that begin on or before this month in 2027 use June; later starts use Dec.
+# Non-new-grad roles that begin before summer 2027 use June. Summer 2027 and
+# later starts use December so the candidate is still enrolled during the role.
 _CUTOFF_YEAR = 2027
-_CUTOFF_MONTH = 6
+_CUTOFF_MONTH = 5
+
+_NEW_GRAD_RE = re.compile(
+    r"\b(?:new[\s-]+grad(?:uate)?|university[\s-]+grad(?:uate)?)s?\b",
+    re.IGNORECASE,
+)
 
 _MONTH_NAMES = {
     "jan": 1,
@@ -122,13 +128,23 @@ def infer_role_start(job: Job) -> tuple[int, int] | None:
     return None
 
 
+def is_new_grad_role(job: Job) -> bool:
+    """Return whether the posting explicitly identifies the role as new grad."""
+    return any(
+        _NEW_GRAD_RE.search(blob) is not None
+        for blob in (job.title, job.notes, job.description)
+        if blob
+    )
+
+
 def resolve_graduation_date(job: Job) -> str:
     """Choose June 2027 or Dec. 2027 for this application.
 
     Priority:
     1. Explicit job.graduation override
-    2. Role start from job.starts, else notes/title/description
-    3. Default June 2027 when the start date is unknown
+    2. Explicit new-grad role -> June 2027
+    3. Role start from job.starts, else notes/title/description
+    4. Default June 2027 when the role type and start date are unknown
     """
     if job.graduation.strip():
         normalized = normalize_graduation_date(job.graduation)
@@ -138,6 +154,9 @@ def resolve_graduation_date(job: Job) -> str:
                 f"Unknown graduation {job.graduation!r}; use one of: {allowed}."
             )
         return normalized
+
+    if is_new_grad_role(job):
+        return GRADUATION_JUNE
 
     start = infer_role_start(job)
     if start is None:

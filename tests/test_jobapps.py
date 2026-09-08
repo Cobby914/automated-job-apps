@@ -62,8 +62,20 @@ class GraduationTests(unittest.TestCase):
     def test_defaults_to_june_when_unknown(self) -> None:
         self.assertEqual(resolve_graduation_date(self._job()), GRADUATION_JUNE)
 
-    def test_summer_maps_to_june(self) -> None:
+    def test_summer_maps_to_dec(self) -> None:
         job = self._job(notes="Summer 2027 internship for graduating seniors.")
+        self.assertEqual(resolve_graduation_date(job), GRADUATION_DEC)
+
+    def test_june_maps_to_dec(self) -> None:
+        job = self._job(starts="June 2027")
+        self.assertEqual(resolve_graduation_date(job), GRADUATION_DEC)
+
+    def test_new_grad_maps_to_june(self) -> None:
+        job = self._job(title="Software Engineer, New Grad")
+        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE)
+
+    def test_new_grad_takes_priority_over_summer_start(self) -> None:
+        job = self._job(title="Software Engineer - New Graduate", starts="Summer 2027")
         self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE)
 
     def test_fall_maps_to_dec(self) -> None:
