@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-import json
 import os
-import subprocess
 import sys
 import unittest
 from pathlib import Path
@@ -11,12 +9,10 @@ from unittest.mock import MagicMock, patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jobapps.career import load_career_bank
-from jobapps.config import openai_reasoning_effort
+from jobapps.config import openai_reasoning_effort, writer_model
 from jobapps.generate import review_materials
 from jobapps.llm import (
-    _complete_cursor,
-    _patch_cursor_windows_bridge,
-    _read_cursor_bridge_discovery,
+    ProviderError,
     anthropic_model_id,
     begin_usage_collection,
     estimate_cost_usd,
@@ -80,13 +76,25 @@ class LlmProviderTests(unittest.TestCase):
             self.assertEqual(resolve_provider("gpt-4.1"), "openai")
             self.assertEqual(resolve_provider("gpt-5.6-sol"), "openai")
 
-    def test_resolve_provider_falls_back_to_cursor(self) -> None:
-        with patch.dict(os.environ, {"LLM_PROVIDER": ""}, clear=False):
+    def test_resolve_provider_defaults_to_openai(self) -> None:
+        with patch.dict(os.environ, {"LLM_PROVIDER": "", "OPENAI_API_KEY": "sk"}, clear=False):
             os.environ.pop("ANTHROPIC_API_KEY", None)
-            os.environ.pop("OPENAI_API_KEY", None)
             os.environ.pop("LLM_PROVIDER", None)
-            self.assertEqual(resolve_provider("claude-4.5-sonnet"), "cursor")
-            self.assertEqual(resolve_provider("gpt-4.1"), "cursor")
+            self.assertEqual(resolve_provider("gpt-4.1"), "openai")
+            with self.assertRaises(ProviderError):
+                resolve_provider("claude-4.5-sonnet")
+
+    def test_resolve_provider_rejects_cursor(self) -> None:
+        with patch.dict(os.environ, {"LLM_PROVIDER": "cursor"}, clear=False):
+            with self.assertRaises(ProviderError):
+                resolve_provider("gpt-4.1")
+
+    def test_writer_model_defaults_to_gpt41(self) -> None:
+        with patch.dict(os.environ, {"OPENAI_WRITER_MODEL": "", "LLM_PROVIDER": "openai"}, clear=False):
+            os.environ.pop("OPENAI_WRITER_MODEL", None)
+            self.assertEqual(writer_model(), "gpt-4.1")
+        with patch.dict(os.environ, {"OPENAI_WRITER_MODEL": "gpt-4o"}, clear=False):
+            self.assertEqual(writer_model(), "gpt-4o")
 
     def test_anthropic_model_alias(self) -> None:
         self.assertEqual(anthropic_model_id("claude-4.5-sonnet"), "claude-sonnet-4-5")
@@ -263,71 +271,6 @@ class CheckerEscalationTests(unittest.TestCase):
         self.assertTrue(escalated)
         self.assertEqual(mock_run.call_count, 2)
         self.assertEqual(model, "claude-opus-5")
-
-
-class CursorWindowsBridgeTests(unittest.TestCase):
-    def test_poll_discovery_parses_ready_line(self) -> None:
-        payload = {
-            "schemaVersion": 1,
-            "transport": "tcp",
-            "protocol": "connect",
-            "url": "http://127.0.0.1:9",
-            "authToken": "tok",
-            "pid": 1,
-        }
-        line = "cursor-sdk-bridge ready " + json.dumps(payload) + "\n"
-        code = (
-            "import os, sys, time;"
-            "sys.stderr.write(os.environ['DISC']);"
-            "sys.stderr.flush();"
-            "time.sleep(5)"
-        )
-        env = os.environ.copy()
-        env["DISC"] = line
-        proc = subprocess.Popen(
-            [sys.executable, "-c", code],
-            stderr=subprocess.PIPE,
-            env=env,
-        )
-        try:
-            discovery = _read_cursor_bridge_discovery(proc, timeout=5)
-            self.assertEqual(discovery["url"], "http://127.0.0.1:9")
-            self.assertEqual(discovery["authToken"], "tok")
-        finally:
-            proc.kill()
-            proc.wait(timeout=5)
-            if proc.stderr is not None:
-                proc.stderr.close()
-
-    def test_complete_cursor_applies_windows_bridge_patch(self) -> None:
-        result = MagicMock()
-        result.status = "finished"
-        result.result = "pong"
-        with patch.dict(os.environ, {"CURSOR_API_KEY": "crsr_test"}, clear=False):
-            with patch("jobapps.llm._patch_cursor_windows_bridge") as apply_patch:
-                with patch("cursor_sdk.Agent.prompt", return_value=result) as prompt:
-                    text = _complete_cursor("", "ping", "composer-2.5", "cursor_ping")
-        apply_patch.assert_called_once()
-        prompt.assert_called_once()
-        self.assertEqual(text, "pong")
-
-    def test_windows_bridge_patch_is_idempotent(self) -> None:
-        import jobapps.llm as llm_mod
-        from cursor_sdk import _bridge
-
-        original = _bridge._read_discovery
-        previous = llm_mod._CURSOR_WINDOWS_BRIDGE_PATCHED
-        try:
-            llm_mod._CURSOR_WINDOWS_BRIDGE_PATCHED = False
-            with patch.object(llm_mod.os, "name", "nt"):
-                _patch_cursor_windows_bridge()
-                first = _bridge._read_discovery
-                _patch_cursor_windows_bridge()
-                self.assertIs(first, _read_cursor_bridge_discovery)
-                self.assertIs(_bridge._read_discovery, first)
-        finally:
-            _bridge._read_discovery = original
-            llm_mod._CURSOR_WINDOWS_BRIDGE_PATCHED = previous
 
 
 if __name__ == "__main__":

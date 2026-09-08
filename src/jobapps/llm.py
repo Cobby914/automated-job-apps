@@ -1,17 +1,14 @@
-"""LLM provider abstraction. Callers must not branch on OpenAI / Anthropic / Cursor."""
+"""LLM provider abstraction. Callers must not branch on OpenAI / Anthropic."""
 
 from __future__ import annotations
 
-import codecs
 import json
 import os
 import random
-import re
 import time
-from collections.abc import Mapping
 from contextvars import ContextVar
 from datetime import datetime, timedelta
-from typing import Any, TypeVar
+from typing import TypeVar
 
 from pydantic import BaseModel
 
@@ -36,7 +33,6 @@ _ANTHROPIC_ALIASES = {
     "claude-opus-4": "claude-opus-4-1",
 }
 
-_OPENAI_PREFIX = re.compile(r"^(gpt|o\d)", re.IGNORECASE)
 _USAGE: ContextVar[list[UsageRecord] | None] = ContextVar("llm_usage", default=None)
 
 # input / cached-input / output USD per 1M tokens. Unknown models use gpt-4.1 rates.
@@ -64,7 +60,7 @@ class ProviderError(PipelineError):
 
 
 def extract_json(text: str) -> str:
-    """Used only for Anthropic/Cursor text responses. OpenAI uses native structured outputs."""
+    """Used only for Anthropic text responses. OpenAI uses native structured outputs."""
     cleaned = text.strip()
     if cleaned.startswith("```"):
         lines = cleaned.splitlines()
@@ -89,18 +85,22 @@ def anthropic_model_id(model: str) -> str:
 
 def resolve_provider(model: str) -> str:
     override = os.getenv("LLM_PROVIDER", "").strip().lower()
-    if override in {"openai", "anthropic", "cursor"}:
+    if override == "cursor":
+        raise ProviderError(
+            "The Cursor SDK provider was removed. Unset LLM_PROVIDER or set it to openai.",
+            retryable=False,
+        )
+    if override in {"openai", "anthropic"}:
         return override
     key = model.strip().lower()
     if key.startswith("claude"):
         if os.getenv("ANTHROPIC_API_KEY", "").strip():
             return "anthropic"
-        return "cursor"
-    if _OPENAI_PREFIX.match(key):
-        if os.getenv("OPENAI_API_KEY", "").strip():
-            return "openai"
-        return "cursor"
-    return "cursor"
+        raise ProviderError(
+            f"Claude model {model!r} requires ANTHROPIC_API_KEY.",
+            retryable=False,
+        )
+    return "openai"
 
 
 def begin_usage_collection() -> list[UsageRecord]:
@@ -290,7 +290,10 @@ def _complete_once(
         return _complete_anthropic(system, user, model, cache_system, purpose)
     if provider == "openai":
         return _complete_openai(system, user, model, purpose)
-    return _complete_cursor(system, user, model, purpose)
+    raise ProviderError(
+        f"Unknown LLM provider {provider!r}. Use openai or anthropic.",
+        retryable=False,
+    )
 
 
 def _usage_from_openai(response: object, model: str, latency_ms: float, purpose: str) -> UsageRecord:
@@ -487,127 +490,6 @@ def _complete_anthropic(system: str, user: str, model: str, cache_system: bool, 
     if not text:
         raise ProviderError(f"Anthropic returned no text ({model}).")
     return text
-
-
-_CURSOR_WINDOWS_BRIDGE_PATCHED = False
-
-
-def _read_cursor_bridge_discovery(process: object, timeout: float) -> Mapping[str, Any]:
-    """Poll bridge stderr instead of select(). Windows select() rejects pipes."""
-    from cursor_sdk._bridge import parse_discovery_line
-    from cursor_sdk.errors import CursorSDKError
-
-    stderr = getattr(process, "stderr", None)
-    if stderr is None:
-        raise CursorSDKError("Bridge process stderr is unavailable")
-    stderr_fd = stderr.fileno()
-    try:
-        was_blocking = os.get_blocking(stderr_fd)
-        os.set_blocking(stderr_fd, False)
-    except (AttributeError, OSError, ValueError):
-        was_blocking = True
-    decoder = codecs.getincrementaldecoder("utf-8")(errors="replace")
-    deadline = time.monotonic() + timeout
-    stderr_lines: list[str] = []
-    pending = ""
-    try:
-        while time.monotonic() < deadline:
-            while True:
-                try:
-                    chunk = os.read(stderr_fd, 8192)
-                except BlockingIOError:
-                    break
-                except OSError:
-                    break
-                if not chunk:
-                    final_text = decoder.decode(b"", final=True)
-                    if final_text:
-                        pending += final_text
-                    if pending:
-                        line = pending
-                        pending = ""
-                        stderr_lines.append(line)
-                        discovery = parse_discovery_line(line)
-                        if discovery is not None:
-                            return discovery
-                    break
-                pending += decoder.decode(chunk)
-                while "\n" in pending:
-                    line, pending = pending.split("\n", 1)
-                    line += "\n"
-                    stderr_lines.append(line)
-                    discovery = parse_discovery_line(line)
-                    if discovery is not None:
-                        return discovery
-            exit_code = process.poll()  # type: ignore[attr-defined]
-            if exit_code is not None:
-                discovery = None
-                if pending:
-                    discovery = parse_discovery_line(pending)
-                if discovery is not None:
-                    return discovery
-                raise CursorSDKError(
-                    f"Bridge exited before discovery with status {exit_code}: "
-                    + "".join(stderr_lines)
-                    + pending
-                )
-            time.sleep(0.05)
-        raise CursorSDKError("Timed out waiting for bridge discovery")
-    finally:
-        try:
-            os.set_blocking(stderr_fd, was_blocking)
-        except Exception:
-            pass
-
-
-def _patch_cursor_windows_bridge() -> None:
-    """cursor-sdk's local bridge uses select() on a pipe; that raises WinError 10038."""
-    global _CURSOR_WINDOWS_BRIDGE_PATCHED
-    if os.name != "nt" or _CURSOR_WINDOWS_BRIDGE_PATCHED:
-        return
-    from cursor_sdk import _bridge
-
-    _bridge._read_discovery = _read_cursor_bridge_discovery
-    _CURSOR_WINDOWS_BRIDGE_PATCHED = True
-
-
-def _complete_cursor(system: str, user: str, model: str, purpose: str) -> str:
-    try:
-        from cursor_sdk import Agent, AgentOptions, CursorAgentError, LocalAgentOptions
-    except ImportError as error:
-        raise ProviderError("cursor-sdk is required for the Cursor LLM provider.") from error
-    from jobapps.config import ROOT
-
-    _patch_cursor_windows_bridge()
-    prompt = f"{system.rstrip()}\n\n{user}" if system.strip() else user
-    started = time.perf_counter()
-    try:
-        result = Agent.prompt(
-            prompt,
-            AgentOptions(
-                api_key=require_env("CURSOR_API_KEY"),
-                model=model,
-                local=LocalAgentOptions(cwd=str(ROOT)),
-                tools=[],
-            ),
-        )
-    except CursorAgentError as error:
-        raise ProviderError(f"Cursor agent failed to start ({model}): {error}", retryable=True) from error
-    latency = (time.perf_counter() - started) * 1000
-    if getattr(result, "status", None) == "error":
-        detail = getattr(result, "result", None) or result.status
-        raise ProviderError(f"Cursor run failed ({model}): {detail}")
-    text = getattr(result, "result", None)
-    if not text or not str(text).strip():
-        raise ProviderError(f"Cursor returned no text ({model}).")
-    record = UsageRecord(
-        provider="cursor",
-        model=model,
-        purpose=purpose,
-        latency_ms=latency,
-    )
-    _record_usage(record)
-    return str(text)
 
 
 def summarize_usage(records: list[UsageRecord] | None = None) -> CostSummary:

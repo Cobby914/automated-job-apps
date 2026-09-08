@@ -40,7 +40,7 @@ def infer_failure_category(error: Exception) -> str:
         return INVALID_PROVENANCE
     if "overflow" in text or "1 page" in text or "overfull" in text:
         return PDF_OVERFLOW
-    if "openai" in text or "anthropic" in text or "cursor" in text or "rate limit" in text:
+    if "openai" in text or "anthropic" in text or "rate limit" in text:
         return PROVIDER_FAILURE
     if "notion" in text:
         return UPLOAD_FAILURE

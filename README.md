@@ -2,7 +2,7 @@
 
 Drop a job YAML into `jobs/`. The pipeline treats `career/*.yaml` as the single source of truth, ranks experiences and projects deterministically, builds an `ApplicationPlan`, writes a tailored resume (and optional cover letter), validates provenance in Python, runs a cheap then expensive semantic review, applies targeted repairs, fits the PDFs to one page, logs a Notion row, and notifies you with the portal URL and any referral match.
 
-Writing, review, and repair go through `src/jobapps/llm.py`. Callers never branch on OpenAI, Anthropic, or Cursor. Direct OpenAI/Anthropic keys are preferred when set; otherwise the Cursor API is the fallback.
+Writing, review, and repair go through `src/jobapps/llm.py`. Callers never branch on OpenAI or Anthropic. The ChatGPT API is the default; set `ANTHROPIC_API_KEY` only if you want Claude for review.
 
 ## Architecture
 
@@ -65,13 +65,13 @@ source .venv/bin/activate   # Windows: .venv\Scripts\activate
 pip install -e .
 ```
 
-4. Copy `.env.example` to `.env`. Set provider keys and **explicit model names**. Do not rely on hidden defaults:
+4. Copy `.env.example` to `.env`. Set `OPENAI_API_KEY`. Model names default to `gpt-4.1` / `gpt-4.1-mini` if unset:
    - `OPENAI_WRITER_MODEL` — strong model for the initial resume/cover letter
    - `OPENAI_REVIEWER_MODEL` — cheaper model for the first semantic pass
    - `OPENAI_ESCALATION_MODEL` — strong reviewer only when something is flagged
    - `OPENAI_REPAIR_MODEL` — cheaper model for tiny bullet/paragraph repairs
    - `OPENAI_REASONING_EFFORT` — GPT-5/o-series Responses API effort (`none`/`minimal`/`low`/`medium`/`high`). Role overrides: `OPENAI_WRITER_REASONING_EFFORT`, `OPENAI_REVIEWER_REASONING_EFFORT`, `OPENAI_REPAIR_REASONING_EFFORT`, `OPENAI_ESCALATION_REASONING_EFFORT`
-   - `LLM_PROVIDER` can force `openai`, `anthropic`, or `cursor`
+   - `LLM_PROVIDER` can force `openai` or `anthropic` (default is the ChatGPT API)
    - `LLM_REVIEWER_PROVIDER` can send review to a different provider
    - `LLM_MAX_RETRIES`, `LLM_RETRY_BASE_SECONDS`, `LLM_DAILY_BUDGET_USD`
 5. Edit `career/` YAML with your real experiences, projects, skills, and profile.
