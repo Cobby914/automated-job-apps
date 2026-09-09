@@ -29,6 +29,9 @@ _LATEX_SPECIALS = {
 
 
 def escape_latex(value: str) -> str:
+    # Each model field is inline text. Blank lines otherwise become LaTeX
+    # paragraphs, and tabs / Unicode spaces can introduce uneven spacing.
+    value = " ".join(value.split())
     return "".join(_LATEX_SPECIALS.get(char, char) for char in value)
 
 

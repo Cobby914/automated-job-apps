@@ -383,6 +383,25 @@ questions:
         self.assertEqual(context["skills"][0]["items"], "Python, TypeScript")
         self.assertIn("Dean's Honor List", context["awards"])
 
+    def test_render_normalizes_inline_whitespace_without_changing_content(self) -> None:
+        from jobapps.latex import _resume_context
+
+        bullet = "  Built\tPython  pipelines.\r\n\r\n  Reduced latency by 10%.\u00a0 "
+        resume = TailoredResume(
+            experience=[],
+            projects=[Project(name=" Demo\n project ", bullets=[bullet])],
+            education=[],
+            skills=[SkillGroup(category=" Languages\t", items="Python,\n\n SQL")],
+        )
+        context = _resume_context(resume)
+        self.assertEqual(context["projects"][0]["name"], "Demo project")
+        self.assertEqual(
+            context["projects"][0]["bullets"],
+            [r"Built Python pipelines. Reduced latency by 10\%."],
+        )
+        self.assertEqual(context["skills"][0], {"category": "Languages", "items": "Python, SQL"})
+        self.assertEqual(resume.projects[0].bullets, [bullet])
+
     def test_notion_id_from_url(self) -> None:
         parsed = parse_notion_id("https://www.notion.so/Job-Apps-0123456789abcdef0123456789abcdef")
         self.assertEqual(parsed, "01234567-89ab-cdef-0123-456789abcdef")
