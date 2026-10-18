@@ -1,8 +1,7 @@
-"""Pick June 2027 or June 2028 from the role.
+"""Every application uses June 2028.
 
-A title that names an internship or co-op uses June 2028 in any season. 2027
-new-grad roles use June 2027. Other roles use June 2027 before summer 2027
-and June 2028 after.
+The owner is taking a 5th year, so internships, co-ops, new-grad roles,
+full-time roles, and postings with no start date all use the same label.
 """
 
 from __future__ import annotations
@@ -12,68 +11,9 @@ from typing import TypeVar
 
 from jobapps.models import CoverLetter, Education, GenerationResult, Job, Resume, TailoredResume
 
-GRADUATION_JUNE = "June 2027"
-GRADUATION_DEC = "Dec. 2027"  # legacy override only
 GRADUATION_JUNE_2028 = "June 2028"
-ALLOWED_GRADUATION_DATES = frozenset({GRADUATION_JUNE, GRADUATION_DEC, GRADUATION_JUNE_2028})
+ALLOWED_GRADUATION_DATES = frozenset({GRADUATION_JUNE_2028})
 
-# Non-new-grad roles that begin before summer 2027 use June 2027. Summer 2027 and
-# later starts use June 2028 (5th year) so the candidate is still enrolled.
-_CUTOFF_YEAR = 2027
-_CUTOFF_MONTH = 5
-
-_NEW_GRAD_RE = re.compile(
-    r"\b(?:new[\s-]+grad(?:uate)?|university[\s-]+grad(?:uate)?|recent[\s-]+grad(?:uate)?|college[\s-]+grad(?:uate)?)s?\b",
-    re.IGNORECASE,
-)
-_INTERN_RE = re.compile(r"\b(?:intern|internship|interns|co-?op)\b", re.IGNORECASE)
-
-_MONTH_NAMES = {
-    "jan": 1,
-    "january": 1,
-    "feb": 2,
-    "february": 2,
-    "mar": 3,
-    "march": 3,
-    "apr": 4,
-    "april": 4,
-    "may": 5,
-    "jun": 6,
-    "june": 6,
-    "jul": 7,
-    "july": 7,
-    "aug": 8,
-    "august": 8,
-    "sep": 9,
-    "sept": 9,
-    "september": 9,
-    "oct": 10,
-    "october": 10,
-    "nov": 11,
-    "november": 11,
-    "dec": 12,
-    "december": 12,
-}
-
-_SEASON_START_MONTH = {
-    "spring": 3,
-    "summer": 6,
-    "fall": 9,
-    "autumn": 9,
-    "winter": 1,
-}
-
-_SEASON_RE = re.compile(
-    r"\b(spring|summer|fall|autumn|winter)\s+(20\d{2})\b",
-    re.IGNORECASE,
-)
-_MONTH_YEAR_RE = re.compile(
-    r"\b("
-    + "|".join(sorted(_MONTH_NAMES, key=len, reverse=True))
-    + r")\.?\s+(20\d{2})\b",
-    re.IGNORECASE,
-)
-_ISO_RE = re.compile(r"\b(20\d{2})[-/](0?[1-9]|1[0-2])\b")
 _GRAD_MENTION_RE = re.compile(
     r"\b(?:June|Dec(?:ember|\.)?)\s+202[78]\b",
     re.IGNORECASE,
@@ -83,78 +23,19 @@ T = TypeVar("T", Resume, TailoredResume)
 
 
 def normalize_graduation_date(value: str) -> str | None:
-    """Return a canonical graduation label, or None if unrecognized."""
+    """Return June 2028, or None when the value is any other date."""
     key = value.strip().lower().replace(".", "")
     key = re.sub(r"\s+", " ", key)
-    if key in {"june 2027", "jun 2027"}:
-        return GRADUATION_JUNE
-    if key in {"dec 2027", "december 2027"}:
-        return GRADUATION_DEC
     if key in {"june 2028", "jun 2028"}:
         return GRADUATION_JUNE_2028
     return None
 
 
-def _graduation_for_start(year: int, month: int) -> str:
-    if (year, month) <= (_CUTOFF_YEAR, _CUTOFF_MONTH):
-        return GRADUATION_JUNE
-    return GRADUATION_JUNE_2028
-
-
-def _parse_start_token(text: str) -> tuple[int, int] | None:
-    """Extract the first role-start (year, month) hint from free text."""
-    if not text or not text.strip():
-        return None
-
-    season = _SEASON_RE.search(text)
-    if season:
-        season_name = season.group(1).lower()
-        year = int(season.group(2))
-        month = _SEASON_START_MONTH[season_name]
-        # "Winter 2027" is treated as early 2027 (Jan); winter after a year
-        # label like "Winter 2028" falls after the June cutoff via the year.
-        return year, month
-
-    month_year = _MONTH_YEAR_RE.search(text)
-    if month_year:
-        month = _MONTH_NAMES[month_year.group(1).lower().rstrip(".")]
-        year = int(month_year.group(2))
-        return year, month
-
-    iso = _ISO_RE.search(text)
-    if iso:
-        return int(iso.group(1)), int(iso.group(2))
-
-    return None
-
-
-def infer_role_start(job: Job) -> tuple[int, int] | None:
-    """Best-effort start month from explicit starts, then notes/title/description."""
-    for blob in (job.starts, job.notes, job.title, job.description):
-        parsed = _parse_start_token(blob)
-        if parsed:
-            return parsed
-    return None
-
-
-def is_new_grad_role(job: Job) -> bool:
-    """Return whether the posting explicitly identifies the role as new grad."""
-    return any(
-        _NEW_GRAD_RE.search(blob) is not None
-        for blob in (job.title, job.notes, job.description)
-        if blob
-    )
-
-
 def resolve_graduation_date(job: Job) -> str:
-    """Choose June 2027 or June 2028 for this application.
+    """Return June 2028 for every role.
 
-    Priority:
-    1. Explicit job.graduation override (June 2027, June 2028, or legacy Dec. 2027)
-    2. Internship or co-op in the title -> June 2028, any season
-    3. Explicit new-grad role -> June 2027
-    4. Role start from job.starts, else notes/title/description
-    5. Default June 2027 when the role type and start date are unknown
+    An empty ``job.graduation`` is June 2028. Any other explicit value,
+    including June 2027 and Dec. 2027, is rejected.
     """
     if job.graduation.strip():
         normalized = normalize_graduation_date(job.graduation)
@@ -164,18 +45,7 @@ def resolve_graduation_date(job: Job) -> str:
                 f"Unknown graduation {job.graduation!r}; use one of: {allowed}."
             )
         return normalized
-
-    # 5th year: any internship / co-op uses June 2028 regardless of season.
-    if _INTERN_RE.search(job.title or ""):
-        return GRADUATION_JUNE_2028
-
-    if is_new_grad_role(job):
-        return GRADUATION_JUNE
-
-    start = infer_role_start(job)
-    if start is None:
-        return GRADUATION_JUNE
-    return _graduation_for_start(*start)
+    return GRADUATION_JUNE_2028
 
 
 def set_education_year(education: list[Education], year: str) -> list[Education]:
