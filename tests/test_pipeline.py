@@ -52,6 +52,23 @@ def _valid_draft(bank, plan) -> DraftResume:
             )
             for item in [bank.experience_by_id()[rid] for rid in plan.experience_ids]
         ],
+        research=[
+            DraftExperience(
+                company=item.company,
+                role=item.role,
+                bullets=[
+                    SourcedBullet(
+                        text=f"{item.id}-r".ljust(100, "r"),
+                        sources=[item.facts[0].id],
+                    ),
+                    SourcedBullet(
+                        text=f"{item.id}-s".ljust(100, "s"),
+                        sources=[item.facts[0].id],
+                    ),
+                ],
+            )
+            for item in [bank.experience_by_id()[rid] for rid in plan.research_ids]
+        ],
         projects=[
             DraftProject(
                 name=item.name,

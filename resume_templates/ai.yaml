@@ -18,16 +18,6 @@ experience:
       - Made a rate-sheet ingestion pipeline with Python, pandas, and PostgreSQL, saving 3 hours of processing.
       - Created a dashboard tracking employee loans using React, PostgreSQL, and TypeScript for 5+ managers.
 
-  - company: University of California, Irvine
-    role: Research Assistant
-    location: Irvine, CA
-    start: Dec. 2025
-    end: Present
-    bullets:
-      - Researching a multi-modal perception system fusing camera and radar data to improve object detection accuracy.
-      - Implementing SOTA deep learning architectures in PyTorch on sensor calibration and spatial feature alignment.
-      - Engineered a CARLA pipeline to create a synchronized radar-camera dataset with labels and geometric metadata.
-
   - company: TENA
     role: Technical Lead
     location: Los Angeles, CA
@@ -48,6 +38,17 @@ experience:
       - Developed a full-stack volunteer tracking dashboard using React, Chakra UI, and Node.js used by 5+ managers.
       - Built backend API and schemas using PostgreSQL, Axios, and TypeScript to build volunteer tracking tables.
       - Optimized case manager table loading latency using React, improving load times by 30 sec. compared to 40 sec.
+
+research:
+  - company: University of California, Irvine
+    role: Research Assistant
+    location: Irvine, CA
+    start: Dec. 2025
+    end: Present
+    bullets:
+      - Researching a multi-modal perception system fusing camera and radar data to improve object detection accuracy.
+      - Implementing SOTA deep learning architectures in PyTorch on sensor calibration and spatial feature alignment.
+      - Engineered a CARLA pipeline to create a synchronized radar-camera dataset with labels and geometric metadata.
 
 education:
   - school: University of California, Irvine

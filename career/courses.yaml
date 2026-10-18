@@ -1,0 +1,86 @@
+# Technical coursework from UCI unofficial transcript. Resume selection is
+# track-aware; humanities / GE courses are omitted from this inventory.
+- id: ics-32a
+  code: I&C SCI 32A
+  name: Python Programming
+  tracks: [swe, ai, default]
+- id: ics-33
+  code: I&C SCI 33
+  name: Intermediate Programming
+  tracks: [swe, default]
+- id: ics-45c
+  code: I&C SCI 45C
+  name: Programming in C/C++
+  tracks: [swe, default]
+- id: math-3a
+  code: MATH 3A
+  name: Linear Algebra
+  tracks: [ai, default]
+- id: ics-46
+  code: I&C SCI 46
+  name: Data Structures
+  tracks: [swe, ai, default]
+- id: stats-67
+  code: STATS 67
+  name: Probability and Statistics for CS
+  tracks: [ai, default]
+- id: ics-6b
+  code: I&C SCI 6B
+  name: Boolean Logic and Discrete Structures
+  tracks: [swe, default]
+- id: informatics-43
+  code: IN4MATX 43
+  name: Software Engineering
+  tracks: [swe, default]
+- id: compsci-171
+  code: COMPSCI 171
+  name: Artificial Intelligence
+  tracks: [ai, default]
+- id: ics-51
+  code: I&C SCI 51
+  name: Computer Organization
+  tracks: [swe, default]
+- id: ics-6d
+  code: I&C SCI 6D
+  name: Discrete Math for CS
+  tracks: [swe, default]
+- id: ics-53
+  code: I&C SCI 53
+  name: Systems Design
+  tracks: [swe, default]
+- id: compsci-147
+  code: COMPSCI 147
+  name: IoT Software and Systems
+  tracks: [swe, default]
+- id: compsci-178
+  code: COMPSCI 178
+  name: Machine Learning and Data Mining
+  tracks: [ai, default]
+- id: compsci-183
+  code: COMPSCI 183
+  name: Computational Biology
+  tracks: [ai, default]
+- id: compsci-184a
+  code: COMPSCI 184A
+  name: AI in Biology and Medicine
+  tracks: [ai]
+- id: compsci-116
+  code: COMPSCI 116
+  name: Computational Photography and Vision
+  tracks: [ai]
+- id: compsci-161
+  code: COMPSCI 161
+  name: Algorithms
+  tracks: [swe, ai, default]
+- id: compsci-175
+  code: COMPSCI 175
+  name: Project in AI
+  tracks: [ai]
+- id: compsci-179
+  code: COMPSCI 179
+  name: Algorithms for Graph Models
+  tracks: [ai, default]
+- id: compsci-189
+  code: COMPSCI 189
+  name: Bioinformatics
+  tracks: [ai, default]

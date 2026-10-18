@@ -32,14 +32,22 @@ You tailor a resume for one job from an ApplicationPlan and the career bank.
 
 Rules:
 - Never invent employers, job titles, dates, degrees, schools, projects, or skills.
-- Use only experiences and projects whose ids appear in ApplicationPlan. \
-Do not add others.
+- Use only experiences, research entries, and projects whose ids appear in \
+ApplicationPlan. Do not add others.
+- Put every id in ApplicationPlan.research_ids into resume.research. Never put \
+those records in resume.experience. If research_ids is empty, leave resume.research empty.
 - Copy the provided skill_groups as-is. Do not add, invent, or rename skill items.
 - Leave resume.summary empty.
 - Keep education exactly as provided (including the graduation year).
+- If ApplicationPlan.coursework is non-empty, put those course names on the first \
+education entry as coursework. Do not invent courses.
+- Copy awards from the career profile as-is. Do not invent awards.
 - Every experience must have {min_exp_bullets}-{max_exp_bullets} content bullets.
+- Every research entry must have {min_research_bullets}-{max_research_bullets} \
+content bullets, with the same length and source rules as experience.
 - Every project must have exactly {proj_bullets} content bullets plus a trailing \
-"Stack: ..." line using the provided stack.
+"Stack: ..." line using the provided stack. Copy each project's start and end \
+dates from the career bank when present.
 - Each content bullet must be one printed line of {min_chars}-{max_chars} characters. \
 Prefer filling the line when facts allow; never exceed {max_chars}.
 - Start from the canonical bullets and expand with grounded tech and impact from \
@@ -88,12 +96,12 @@ not generic, 4-6 paragraphs of real substance.
 
 Every issue must be an object with:
 - type: ungrounded | invention | generic | irrelevant | voice | unsupported_claim | other
-- section: experience | project | cover_letter | resume | answers
+- section: experience | research | project | cover_letter | resume | answers
 - item_id: career record id such as uci-scalesense (empty for cover_letter/resume)
-- bullet_index: 0-based content bullet index when section is experience or project
+- bullet_index: 0-based content bullet index when section is experience, research, or project
 - paragraph_index: 0-based when section is cover_letter
-- location: experience[i].bullets[j], projects[i].bullets[j], cover_letter.paragraphs[k], \
-or resume (fallback if item_id is unknown)
+- location: experience[i].bullets[j], research[i].bullets[j], projects[i].bullets[j], \
+cover_letter.paragraphs[k], or resume (fallback if item_id is unknown)
 - code: same as type
 - message: one specific sentence
 - severity: error or warning
@@ -178,6 +186,7 @@ def career_prompt_block(bank: CareerBank) -> str:
             "experiences": [item.prompt_payload() for item in bank.experiences],
             "projects": [item.prompt_payload() for item in bank.projects],
             "education": [item.model_dump() for item in bank.profile.education],
+            "awards": list(bank.profile.awards),
         }
     )
 
@@ -193,6 +202,8 @@ def generate_resume_draft(
 {RESUME_WRITER_PROMPT.format(
     min_exp_bullets=layout.min_experience_bullets,
     max_exp_bullets=layout.max_experience_bullets,
+    min_research_bullets=layout.min_research_bullets,
+    max_research_bullets=layout.max_research_bullets,
     proj_bullets=layout.project_bullets,
     min_chars=layout.min_bullet_chars,
     max_chars=layout.max_bullet_chars,
@@ -221,6 +232,12 @@ def generate_resume_draft(
         draft = draft.model_copy(update={"skills": list(plan.skill_groups)})
     if not draft.education:
         draft = draft.model_copy(update={"education": list(bank.profile.education)})
+    if plan.coursework and draft.education and not draft.education[0].coursework:
+        education = list(draft.education)
+        education[0] = education[0].model_copy(update={"coursework": list(plan.coursework)})
+        draft = draft.model_copy(update={"education": education})
+    if bank.profile.awards and not draft.awards:
+        draft = draft.model_copy(update={"awards": list(bank.profile.awards)})
     return draft, len(system) + len(user)
 
 

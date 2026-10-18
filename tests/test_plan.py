@@ -32,6 +32,8 @@ class PlanTests(unittest.TestCase):
         self.assertLessEqual(len(plan.skill_groups), plan.layout.max_skill_groups)
         self.assertEqual(plan.template, "swe")
         self.assertTrue(plan.cover_letter)
+        self.assertEqual(plan.research_ids, ["uci-scalesense"])
+        self.assertNotIn("uci-scalesense", plan.experience_ids)
 
     def test_plan_includes_explanations_and_priorities(self) -> None:
         job = Job(

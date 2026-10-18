@@ -72,9 +72,11 @@ class RankingTests(unittest.TestCase):
             template="ai",
         )
         ranked = rank_experiences(job, self.bank, "ai")
-        self.assertEqual(ranked[0].record_id, "uci-scalesense")
+        self.assertNotIn("uci-scalesense", [item.record_id for item in ranked])
+        research = self.bank.experience_by_id()["uci-scalesense"]
+        self.assertEqual(research.section, "research")
+        self.assertGreater(score_record(job, research, "ai"), ranked[0].score)
         self.assertTrue(ranked[0].explanation)
-        self.assertTrue(ranked[0].matched_terms)
         projects = rank_projects(job, self.bank, "ai")
         self.assertIn(
             projects[0].record_id,

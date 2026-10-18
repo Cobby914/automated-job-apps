@@ -156,6 +156,7 @@ class Education(BaseModel):
     location: str = ""
     year: str = ""
     details: str = ""
+    coursework: list[str] = Field(default_factory=list)
 
     @field_validator("year", mode="before")
     @classmethod
@@ -164,10 +165,23 @@ class Education(BaseModel):
             return ""
         return str(value)
 
+    @field_validator("coursework", mode="before")
+    @classmethod
+    def coerce_coursework(cls, value: object) -> list[str]:
+        if value is None:
+            return []
+        if isinstance(value, str):
+            return [part.strip() for part in value.split(",") if part.strip()]
+        if isinstance(value, list):
+            return [str(item).strip() for item in value if str(item).strip()]
+        return []
+
 
 class Project(BaseModel):
     name: str
     url: str = ""
+    start: str = ""
+    end: str = ""
     bullets: list[str] = Field(default_factory=list)
 
 
@@ -180,8 +194,10 @@ class Resume(BaseModel):
     contact: Contact
     summary: str = ""
     experience: list[Experience] = Field(default_factory=list)
+    research: list[Experience] = Field(default_factory=list)
     education: list[Education] = Field(default_factory=list)
     projects: list[Project] = Field(default_factory=list)
+    awards: list[str] = Field(default_factory=list)
     skills: list[SkillGroup] = Field(default_factory=list)
 
 
@@ -196,8 +212,10 @@ class Connection(BaseModel):
 class TailoredResume(BaseModel):
     summary: str = ""
     experience: list[Experience]
+    research: list[Experience] = Field(default_factory=list)
     projects: list[Project] = Field(default_factory=list)
     education: list[Education]
+    awards: list[str] = Field(default_factory=list)
     skills: list[SkillGroup] = Field(default_factory=list)
 
 
@@ -255,6 +273,8 @@ class DraftExperience(BaseModel):
 class DraftProject(BaseModel):
     name: str
     url: str = ""
+    start: str = ""
+    end: str = ""
     bullets: list[SourcedBullet] = Field(default_factory=list)
 
     @field_validator("bullets", mode="before")
@@ -266,6 +286,8 @@ class DraftProject(BaseModel):
         return Project(
             name=self.name,
             url=self.url,
+            start=self.start,
+            end=self.end,
             bullets=[item.text for item in self.bullets],
         )
 
@@ -273,16 +295,20 @@ class DraftProject(BaseModel):
 class DraftResume(BaseModel):
     summary: str = ""
     experience: list[DraftExperience] = Field(default_factory=list)
+    research: list[DraftExperience] = Field(default_factory=list)
     projects: list[DraftProject] = Field(default_factory=list)
     education: list[Education] = Field(default_factory=list)
+    awards: list[str] = Field(default_factory=list)
     skills: list[SkillGroup] = Field(default_factory=list)
 
     def to_tailored(self) -> TailoredResume:
         return TailoredResume(
             summary=self.summary,
             experience=[item.to_experience() for item in self.experience],
+            research=[item.to_experience() for item in self.research],
             projects=[item.to_project() for item in self.projects],
             education=self.education,
+            awards=list(self.awards),
             skills=self.skills,
         )
 
@@ -302,15 +328,29 @@ def draft_from_tailored(resume: TailoredResume) -> DraftResume:
             )
             for item in resume.experience
         ],
+        research=[
+            DraftExperience(
+                company=item.company,
+                role=item.role,
+                location=item.location,
+                start=item.start,
+                end=item.end,
+                bullets=[SourcedBullet(text=bullet) for bullet in item.bullets],
+            )
+            for item in resume.research
+        ],
         projects=[
             DraftProject(
                 name=item.name,
                 url=item.url,
+                start=item.start,
+                end=item.end,
                 bullets=[SourcedBullet(text=bullet) for bullet in item.bullets],
             )
             for item in resume.projects
         ],
         education=resume.education,
+        awards=list(resume.awards),
         skills=resume.skills,
     )
 
@@ -406,6 +446,13 @@ def parse_issue_location(location: str) -> ParsedLocation | None:
     text = (location or "").strip().casefold().replace(" ", "").replace("_", "")
     if not text or text in {"resume", "skills", "education", "summary"}:
         return ParsedLocation(kind="resume")
+    match = re.fullmatch(r"research\[(\d+)\](?:\.bullets\[(\d+)\])?", text)
+    if match:
+        return ParsedLocation(
+            kind="research",
+            item_index=int(match.group(1)),
+            part_index=int(match.group(2) or 0),
+        )
     match = re.fullmatch(r"experience\[(\d+)\](?:\.bullets\[(\d+)\])?", text)
     if match:
         return ParsedLocation(
@@ -523,21 +570,26 @@ class LayoutBudget(BaseModel):
     min_experiences: int = 3
     max_experiences: int = 4
     min_projects: int = 2
-    max_projects: int = 3
+    max_projects: int = 2
     min_experience_bullets: int = 2
     max_experience_bullets: int = 3
+    min_research_bullets: int = 2
+    max_research_bullets: int = 3
     project_bullets: int = 2
     min_bullet_chars: int = MIN_BULLET_CHARS
     max_bullet_chars: int = MAX_BULLET_CHARS
     min_skill_groups: int = 3
-    max_skill_groups: int = 5
+    max_skill_groups: int = 4
+    max_courses: int = 6
 
 
 class ApplicationPlan(BaseModel):
     template: str
     template_reason: str = ""
     experience_ids: list[str] = Field(default_factory=list)
+    research_ids: list[str] = Field(default_factory=list)
     project_ids: list[str] = Field(default_factory=list)
+    coursework: list[str] = Field(default_factory=list)
     skill_groups: list[SkillGroup] = Field(default_factory=list)
     layout: LayoutBudget = Field(default_factory=LayoutBudget)
     cover_letter: bool = True
@@ -625,6 +677,16 @@ def overlong_bullet_issues(resume: TailoredResume, max_chars: int = MAX_BULLET_C
                 preview = bullet if length <= 80 else f"{bullet[:77]}..."
                 issues.append(
                     f"Experience {item.company} / {item.role}: {length} chars (max {max_chars}): {preview}"
+                )
+    for item in resume.research:
+        for bullet in item.bullets:
+            if is_stack_bullet(bullet):
+                continue
+            length = len(bullet)
+            if length > max_chars:
+                preview = bullet if length <= 80 else f"{bullet[:77]}..."
+                issues.append(
+                    f"Research {item.company} / {item.role}: {length} chars (max {max_chars}): {preview}"
                 )
     for item in resume.projects:
         for bullet in item.bullets:

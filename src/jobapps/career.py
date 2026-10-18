@@ -21,6 +21,7 @@ from jobapps.models import (
 )
 
 MetricKind = Literal["absolute", "relative", "count"]
+SectionKind = Literal["experience", "research"]
 
 
 class Fact(BaseModel):
@@ -82,7 +83,16 @@ class ExperienceRecord(BaseModel):
     location: str = ""
     start: str = ""
     end: str = ""
+    section: SectionKind = "experience"
     summary: str = ""
+
+    @field_validator("section", mode="before")
+    @classmethod
+    def normalize_section(cls, value: object) -> str:
+        key = str(value or "experience").strip().casefold()
+        if key not in {"experience", "research"}:
+            raise ValueError(f"section must be experience or research; got {value!r}")
+        return key
     technologies: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
     domains: list[str] = Field(default_factory=list)
@@ -109,6 +119,7 @@ class ExperienceRecord(BaseModel):
             "location": self.location,
             "start": self.start,
             "end": self.end,
+            "section": self.section,
             "summary": self.summary,
             "technologies": self.technologies,
             "facts": [item.model_dump() for item in self.facts],
@@ -121,6 +132,8 @@ class ProjectRecord(BaseModel):
     id: str
     name: str
     url: str = ""
+    start: str = ""
+    end: str = ""
     summary: str = ""
     technologies: list[str] = Field(default_factory=list)
     tags: list[str] = Field(default_factory=list)
@@ -149,6 +162,8 @@ class ProjectRecord(BaseModel):
             "id": self.id,
             "name": self.name,
             "url": self.url,
+            "start": self.start,
+            "end": self.end,
             "summary": self.summary,
             "technologies": self.technologies,
             "stack": self.stack,
@@ -158,9 +173,17 @@ class ProjectRecord(BaseModel):
         }
 
 
+class CourseRecord(BaseModel):
+    id: str
+    code: str = ""
+    name: str
+    tracks: list[str] = Field(default_factory=list)
+
+
 class CareerProfile(BaseModel):
     contact: Contact
     education: list[Education] = Field(default_factory=list)
+    awards: list[str] = Field(default_factory=list)
 
 
 class SkillsInventory(BaseModel):
@@ -191,10 +214,17 @@ class CareerBank(BaseModel):
     profile: CareerProfile
     experiences: list[ExperienceRecord] = Field(default_factory=list)
     projects: list[ProjectRecord] = Field(default_factory=list)
+    courses: list[CourseRecord] = Field(default_factory=list)
     skills: SkillsInventory = Field(default_factory=SkillsInventory)
 
     def experience_by_id(self) -> dict[str, ExperienceRecord]:
         return {item.id: item for item in self.experiences}
+
+    def work_experiences(self) -> list[ExperienceRecord]:
+        return [item for item in self.experiences if item.section != "research"]
+
+    def research_experiences(self) -> list[ExperienceRecord]:
+        return [item for item in self.experiences if item.section == "research"]
 
     def project_by_id(self) -> dict[str, ProjectRecord]:
         return {item.id: item for item in self.projects}
@@ -303,10 +333,18 @@ def load_career_bank(directory: Path | None = None) -> CareerBank:
     if not isinstance(projects_raw, list):
         raise ValueError(f"Projects file must be a YAML list: {root / 'projects.yaml'}")
 
+    courses_path = root / "courses.yaml"
+    courses_raw = _read_yaml(courses_path) if courses_path.is_file() else []
+    if courses_raw is None:
+        courses_raw = []
+    if not isinstance(courses_raw, list):
+        raise ValueError(f"Courses file must be a YAML list: {courses_path}")
+
     bank = CareerBank(
         profile=profile,
         experiences=[ExperienceRecord.model_validate(item) for item in experiences_raw],
         projects=[ProjectRecord.model_validate(item) for item in projects_raw],
+        courses=[CourseRecord.model_validate(item) for item in courses_raw],
         skills=load_skills_inventory(root / "skills.yaml"),
     )
     _validate_unique_ids(bank)

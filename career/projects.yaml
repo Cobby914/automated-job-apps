@@ -1,6 +1,8 @@
 - id: genome-sequencing
   name: Genome Sequencing
   url: ""
+  start: Oct. 2025
+  end: Dec. 2025
   tracks: [swe, ai, default]
   tags: [ml, data-pipeline, research, classification]
   domains: [bioinformatics, machine-learning]
@@ -48,6 +50,8 @@
 - id: tumor-classification
   name: Tumor Classification based Scans
   url: ""
+  start: Oct. 2025
+  end: Dec. 2025
   tracks: [swe, ai, default]
   tags: [ml, computer-vision, explainability, medical]
   domains: [healthcare, machine-learning]
@@ -101,6 +105,8 @@
 - id: canvas-notion
   name: Canvas-Notion
   url: ""
+  start: Oct. 2024
+  end: May 2025
   tracks: [swe, ai, default]
   tags: [automation, apis, data-pipeline, backend]
   domains: [productivity, education]
@@ -145,6 +151,8 @@
 - id: reel-in
   name: Reel In
   url: ""
+  start: Oct. 2024
+  end: May 2025
   tracks: [swe, default]
   tags: [fullstack, frontend, backend, student]
   domains: [education, web]
@@ -192,6 +200,8 @@
 - id: smart-step
   name: Smart Step
   url: ""
+  start: Oct. 2025
+  end: Dec. 2025
   tracks: [ai, default]
   tags: [embedded, sensors, assistive, hardware, cloud]
   domains: [embedded, accessibility, iot]
@@ -244,6 +254,8 @@
 - id: personal-website
   name: Personal Website
   url: https://colinkwon914.com/
+  start: Jan. 2026
+  end: Mar. 2026
   tracks: [default]
   tags: [frontend, portfolio]
   domains: [web]
@@ -278,6 +290,8 @@
 - id: unity-rl
   name: Unity Reinforcement Learning
   url: ""
+  start: Mar. 2026
+  end: June 2026
   tracks: []
   tags: [rl, simulation, ml, games]
   domains: [reinforcement-learning, simulation]
@@ -340,6 +354,8 @@
 - id: unix-shell
   name: Unix Shell
   url: ""
+  start: Oct. 2025
+  end: Nov. 2025
   tracks: []
   tags: [systems, c, os, posix]
   domains: [systems, operating-systems]
@@ -383,6 +399,8 @@
 - id: emg-robotic-arm
   name: EMG-Controlled Robotic Arm
   url: ""
+  start: Aug. 2026
+  end: Present
   tracks: []
   tags: [ml, embedded, robotics, signal-processing, in-progress]
   domains: [robotics, machine-learning, embedded]

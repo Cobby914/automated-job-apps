@@ -89,22 +89,38 @@ def _split_stack(bullets: list[str]) -> tuple[list[str], str]:
     return bullets, ""
 
 
-def _resume_context(resume: TailoredResume) -> dict[str, object]:
-    awards: list[str] = []
-    for item in resume.education:
-        for part in item.details.split(";"):
-            text = part.strip()
-            if text:
-                awards.append(escape_latex(text))
+def _role_context(items: list) -> list[dict[str, object]]:
+    return [
+        {
+            "company": escape_latex(item.company),
+            "role": escape_latex(item.role),
+            "location": escape_latex(item.location),
+            "start": escape_latex(item.start),
+            "end": escape_latex(item.end),
+            "bullets": [escape_latex(bullet) for bullet in item.bullets],
+        }
+        for item in items
+    ]
 
+
+def _resume_context(resume: TailoredResume) -> dict[str, object]:
     projects = []
     for item in resume.projects:
         bullets, stack = _split_stack(item.bullets)
+        start = (item.start or "").strip()
+        end = (item.end or "").strip()
+        if start and end:
+            dates = escape_latex(f"{start} -- {end}")
+        elif start or end:
+            dates = escape_latex(start or end)
+        else:
+            dates = ""
         projects.append(
             {
                 "name": escape_latex(item.name),
                 "url": escape_latex(item.url),
                 "href": escape_url(ensure_url(item.url)),
+                "dates": dates,
                 "stack": escape_latex(stack),
                 "bullets": [escape_latex(bullet) for bullet in bullets],
             }
@@ -112,17 +128,8 @@ def _resume_context(resume: TailoredResume) -> dict[str, object]:
 
     return {
         "summary": "",  # Summary section removed from the template
-        "experience": [
-            {
-                "company": escape_latex(item.company),
-                "role": escape_latex(item.role),
-                "location": escape_latex(item.location),
-                "start": escape_latex(item.start),
-                "end": escape_latex(item.end),
-                "bullets": [escape_latex(bullet) for bullet in item.bullets],
-            }
-            for item in resume.experience
-        ],
+        "experience": _role_context(resume.experience),
+        "research": _role_context(resume.research),
         "projects": projects,
         "education": [
             {
@@ -131,10 +138,11 @@ def _resume_context(resume: TailoredResume) -> dict[str, object]:
                 "location": escape_latex(item.location),
                 "year": escape_latex(item.year),
                 "details": escape_latex(item.details),
+                "coursework": escape_latex(", ".join(item.coursework)),
             }
             for item in resume.education
         ],
-        "awards": awards,
+        "awards": [escape_latex(award) for award in resume.awards if award.strip()],
         "skills": [
             {"category": escape_latex(group.category), "items": escape_latex(group.items)}
             for group in resume.skills
@@ -298,6 +306,7 @@ def render_documents(
             "company": escape_latex(job.company),
             "title": escape_latex(job.title),
         },
+        "research_first": template_name.strip().casefold() == "ai",
     }
 
     resume_tex = output_dir / "resume.tex"

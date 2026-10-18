@@ -24,7 +24,7 @@ from jobapps.models import (
     overlong_bullet_issues,
     unknown_skill_issues,
 )
-from jobapps.plan import selected_experiences, selected_projects
+from jobapps.plan import selected_experiences, selected_projects, selected_research
 
 MAX_SEMANTIC_REVISIONS = 1
 MAX_BULLET_REPAIRS = 2
@@ -97,6 +97,29 @@ def validate_resume(
                 f"keep at most {layout.max_experience_bullets}."
             )
 
+    if plan.research_ids and len(resume.research) != len(plan.research_ids):
+        issues.append(
+            f"Resume has {len(resume.research)} research entries; "
+            f"need {len(plan.research_ids)}."
+        )
+    elif resume.research and not plan.research_ids:
+        issues.append("Resume includes research entries that were not selected.")
+
+    for item in resume.research:
+        if not item.company.strip() or not item.role.strip():
+            issues.append("Research entry is missing organization or role.")
+        count = len(content_bullets(item.bullets))
+        if enforce_layout_mins and count < layout.min_research_bullets:
+            issues.append(
+                f"Research {item.company} / {item.role} has {count} bullets; "
+                f"need at least {layout.min_research_bullets}."
+            )
+        if count > layout.max_research_bullets:
+            issues.append(
+                f"Research {item.company} / {item.role} has {count} bullets; "
+                f"keep at most {layout.max_research_bullets}."
+            )
+
     for item in resume.projects:
         if not item.name.strip():
             issues.append("A project is missing a name.")
@@ -152,6 +175,18 @@ def _experience_record(
     return None
 
 
+def _research_record(
+    item: DraftExperience, plan: ApplicationPlan, bank: CareerBank
+) -> ExperienceRecord | None:
+    for record in selected_research(plan, bank):
+        if record.company == item.company and record.role == item.role:
+            return record
+    for record in selected_research(plan, bank):
+        if record.company == item.company:
+            return record
+    return None
+
+
 def _project_record(
     item: DraftProject, plan: ApplicationPlan, bank: CareerBank
 ) -> ProjectRecord | None:
@@ -201,6 +236,27 @@ def validate_sources(
     for item in draft.experience:
         record = _experience_record(item, plan, bank)
         label = f"Experience {item.company} / {item.role}"
+        if record is None:
+            issues.append(f"{label} is not in the selected career records.")
+            continue
+        allowed = record.fact_metric_ids()
+        for index, bullet in enumerate(item.bullets):
+            if is_stack_bullet(bullet.text):
+                continue
+            if not bullet.sources:
+                issues.append(f"{label} bullet {index + 1} is missing sources.")
+                continue
+            unknown = [sid for sid in bullet.sources if sid not in allowed]
+            if unknown:
+                issues.append(
+                    f"{label} bullet {index + 1} cites unknown sources: "
+                    + ", ".join(unknown)
+                )
+                continue
+            issues.extend(_metric_provenance_issues(bullet, record, label, index))
+    for item in draft.research:
+        record = _research_record(item, plan, bank)
+        label = f"Research {item.company} / {item.role}"
         if record is None:
             issues.append(f"{label} is not in the selected career records.")
             continue
@@ -302,16 +358,62 @@ def apply_mechanical_fixes(
     plan: ApplicationPlan,
     profile_education: list,
     project_stacks: dict[str, str],
+    bank: CareerBank | None = None,
 ) -> DraftResume:
     """Fix issues Python can correct without an LLM call."""
     layout = plan.layout
+    research_keys: set[tuple[str, str]] = set()
+    if bank is not None:
+        selected = set(plan.research_ids)
+        for record in bank.research_experiences():
+            if record.id in selected:
+                research_keys.add((record.company, record.role))
+
     experience = []
+    research = list(draft.research)
+    seen_research = {(item.company, item.role) for item in research}
     for item in draft.experience:
+        key = (item.company, item.role)
+        if key in research_keys:
+            if key not in seen_research:
+                research.append(item)
+                seen_research.add(key)
+            continue
         content = [b for b in item.bullets if not is_stack_bullet(b.text)]
         if len(content) > layout.max_experience_bullets:
             content = content[: layout.max_experience_bullets]
         experience.append(item.model_copy(update={"bullets": content}))
 
+    if bank is not None and plan.research_ids:
+        ordered: list[DraftExperience] = []
+        used: set[int] = set()
+        for record_id in plan.research_ids:
+            record = bank.experience_by_id().get(record_id)
+            if record is None:
+                continue
+            for index, item in enumerate(research):
+                if index in used:
+                    continue
+                if item.company == record.company and item.role == record.role:
+                    ordered.append(item)
+                    used.add(index)
+                    break
+        ordered.extend(item for index, item in enumerate(research) if index not in used)
+        research = ordered
+
+    capped_research = []
+    for item in research:
+        content = [b for b in item.bullets if not is_stack_bullet(b.text)]
+        if len(content) > layout.max_research_bullets:
+            content = content[: layout.max_research_bullets]
+        capped_research.append(item.model_copy(update={"bullets": content}))
+    research = capped_research
+
+    project_lookup = (
+        {record.name.strip().casefold(): record for record in bank.projects}
+        if bank is not None
+        else {}
+    )
     projects = []
     for item in draft.projects:
         content = [b for b in item.bullets if not is_stack_bullet(b.text)]
@@ -327,20 +429,38 @@ def apply_mechanical_fixes(
         bullets = list(content)
         if stack is not None:
             bullets.append(stack)
-        projects.append(item.model_copy(update={"bullets": bullets}))
+        updates: dict[str, object] = {"bullets": bullets}
+        record = project_lookup.get(item.name.strip().casefold())
+        if record is not None:
+            if not item.start.strip() and record.start.strip():
+                updates["start"] = record.start
+            if not item.end.strip() and record.end.strip():
+                updates["end"] = record.end
+            if not item.url.strip() and record.url.strip():
+                updates["url"] = record.url
+        projects.append(item.model_copy(update=updates))
 
     education = list(draft.education) or list(profile_education)
+    if plan.coursework and education:
+        first = education[0]
+        if not first.coursework:
+            education[0] = first.model_copy(update={"coursework": list(plan.coursework)})
     if len(experience) > layout.max_experiences:
         experience = experience[: layout.max_experiences]
     if len(projects) > layout.max_projects:
         projects = projects[: layout.max_projects]
     skills = list(plan.skill_groups) if plan.skill_groups else list(draft.skills)
+    awards = list(draft.awards)
+    if bank is not None and bank.profile.awards and not awards:
+        awards = list(bank.profile.awards)
     return draft.model_copy(
         update={
             "summary": "",
             "experience": experience,
+            "research": research,
             "projects": projects,
             "education": education,
+            "awards": awards,
             "skills": skills,
         }
     )

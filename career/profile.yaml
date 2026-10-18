@@ -12,4 +12,8 @@ education:
     degree: B.S. Computer Science
     location: Irvine, CA
     year: "June 2027"
-    details: Campuswide Honors Collegium at UCI; Dean's Honor List; Chancellor's Award for Excellence in Undergraduate Research
+    details: Campuswide Honors Collegium at UCI; Dean's Honor List
+
+awards:
+  - Chancellor's Award for Excellence in Undergraduate Research
+  - Winner, ACM SIGBED Student Research Competition

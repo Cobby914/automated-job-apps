@@ -66,6 +66,13 @@ def longest_content_bullet(resume: TailoredResume) -> tuple[str, int, int] | Non
             candidate = (len(bullet), "experience", item_index, bullet_index)
             if best is None or candidate[0] > best[0]:
                 best = candidate
+    for item_index, item in enumerate(resume.research):
+        for bullet_index, bullet in enumerate(item.bullets):
+            if is_stack_bullet(bullet):
+                continue
+            candidate = (len(bullet), "research", item_index, bullet_index)
+            if best is None or candidate[0] > best[0]:
+                best = candidate
     for item_index, item in enumerate(resume.projects):
         for bullet_index, bullet in enumerate(item.bullets):
             if is_stack_bullet(bullet):
@@ -89,6 +96,12 @@ def _experience_key(resume: TailoredResume, index: int, plan: ApplicationPlan) -
     if index < len(plan.experience_ids):
         return plan.experience_ids[index]
     return f"experience:{index}:{resume.experience[index].company}"
+
+
+def _research_key(resume: TailoredResume, index: int, plan: ApplicationPlan) -> str:
+    if index < len(plan.research_ids):
+        return plan.research_ids[index]
+    return f"research:{index}:{resume.research[index].company}"
 
 
 def _project_key(resume: TailoredResume, index: int, plan: ApplicationPlan) -> str:
@@ -158,11 +171,38 @@ def apply_python_trim_step(
                 detail=f"removed experience bullet {bullet_index} from {item_id}",
             )
 
+    over_research = [
+        index
+        for index, item in enumerate(resume.research)
+        if len(_content_indices(item.bullets)) > layout.min_research_bullets
+    ]
+    if over_research:
+        index = max(over_research, key=lambda i: _priority_index(plan, _research_key(resume, i, plan)))
+        trimmed = drop_last_content_bullet(resume.research[index].bullets)
+        if trimmed is not None:
+            item_id = _research_key(resume, index, plan)
+            bullet_index = _content_indices(resume.research[index].bullets)[-1]
+            research = list(resume.research)
+            research[index] = research[index].model_copy(update={"bullets": trimmed})
+            return resume.model_copy(update={"research": research}), FitChange(
+                action="removed_research_bullet",
+                section="research",
+                item_id=item_id,
+                item_index=index,
+                bullet_index=bullet_index,
+                detail=f"removed research bullet {bullet_index} from {item_id}",
+            )
+
     candidates: list[tuple[int, str, int]] = []
     for index, item in enumerate(resume.experience):
         if len(_content_indices(item.bullets)) > 1:
             candidates.append(
                 (_priority_index(plan, _experience_key(resume, index, plan)), "experience", index)
+            )
+    for index, item in enumerate(resume.research):
+        if len(_content_indices(item.bullets)) > 1:
+            candidates.append(
+                (_priority_index(plan, _research_key(resume, index, plan)), "research", index)
             )
     for index, item in enumerate(resume.projects):
         if len(_content_indices(item.bullets)) > 1:
@@ -183,6 +223,19 @@ def apply_python_trim_step(
                     item_id=item_id,
                     item_index=index,
                     detail=f"removed extra experience bullet from {item_id}",
+                )
+        elif kind == "research":
+            trimmed = drop_last_content_bullet(resume.research[index].bullets)
+            if trimmed is not None:
+                item_id = _research_key(resume, index, plan)
+                research = list(resume.research)
+                research[index] = research[index].model_copy(update={"bullets": trimmed})
+                return resume.model_copy(update={"research": research}), FitChange(
+                    action="removed_research_bullet",
+                    section="research",
+                    item_id=item_id,
+                    item_index=index,
+                    detail=f"removed extra research bullet from {item_id}",
                 )
         else:
             trimmed = drop_last_content_bullet(resume.projects[index].bullets)

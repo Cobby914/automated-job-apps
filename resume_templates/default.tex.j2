@@ -118,14 +118,20 @@
     \resumeSubheading
       {\VAR{item.school}}{\VAR{item.location}}
       {\VAR{item.degree}}{\VAR{item.year}}
+      \BLOCK{if item.coursework}
+      \resumeItemListStart
+        \resumeItem{\textbf{Relevant Coursework:} \VAR{item.coursework}}
+      \resumeItemListEnd
+      \BLOCK{endif}
     \BLOCK{endfor}
   \resumeSubHeadingListEnd
 \BLOCK{endif}
 
-\BLOCK{if resume.experience}
-\section{Experience}
+\BLOCK{macro role_section(title, items)}
+\BLOCK{if items}
+\section{\VAR{title}}
   \resumeSubHeadingListStart
-    \BLOCK{for item in resume.experience}
+    \BLOCK{for item in items}
     \resumeSubheading
       {\VAR{item.role}}{\VAR{item.start} -- \VAR{item.end}}
       {\VAR{item.company}}{\VAR{item.location}}
@@ -139,6 +145,15 @@
     \BLOCK{endfor}
   \resumeSubHeadingListEnd
 \BLOCK{endif}
+\BLOCK{endmacro}
+
+\BLOCK{if research_first}
+\VAR{role_section('Research', resume.research)}
+\VAR{role_section('Experience', resume.experience)}
+\BLOCK{else}
+\VAR{role_section('Experience', resume.experience)}
+\VAR{role_section('Research', resume.research)}
+\BLOCK{endif}
 
 \BLOCK{if resume.projects}
 \vspace{-10pt}
@@ -146,7 +161,7 @@
     \resumeSubHeadingListStart
       \BLOCK{for item in resume.projects}
       \resumeProjectHeading
-          {\textbf{\VAR{item.name}}\BLOCK{if item.stack} $|$ \emph{\VAR{item.stack}}\BLOCK{endif}}{\BLOCK{if item.href}\href{\VAR{item.href}}{\underline{\VAR{item.url}}}\BLOCK{endif}}
+          {\textbf{\VAR{item.name}}\BLOCK{if item.stack} $|$ \emph{\VAR{item.stack}}\BLOCK{endif}}{\BLOCK{if item.dates}\VAR{item.dates}\BLOCK{elif item.href}\href{\VAR{item.href}}{\underline{\VAR{item.url}}}\BLOCK{endif}}
           \BLOCK{if item.bullets}
           \resumeItemListStart
             \BLOCK{for bullet in item.bullets}

@@ -40,7 +40,10 @@ class CareerBankTests(unittest.TestCase):
     def test_track_membership(self) -> None:
         exp = self.bank.experience_by_id()
         self.assertIn("ai", exp["uci-scalesense"].tracks)
-        self.assertNotIn("swe", exp["uci-scalesense"].tracks)
+        self.assertIn("swe", exp["uci-scalesense"].tracks)
+        self.assertIn("default", exp["uci-scalesense"].tracks)
+        self.assertEqual(exp["uci-scalesense"].section, "research")
+        self.assertEqual(exp["mk-lending"].section, "experience")
         self.assertIn("swe", exp["fipet"].tracks)
         self.assertNotIn("ai", exp["fipet"].tracks)
         projects = self.bank.project_by_id()
@@ -95,7 +98,7 @@ class CareerBankTests(unittest.TestCase):
     def test_relative_metrics_are_labeled(self) -> None:
         tena = self.bank.experience_by_id()["tena"]
         self.assertEqual(tena.metrics[0].kind, "relative")
-        self.assertIn("relative", tena.metrics[0].text.casefold())
+        self.assertIn("30%", tena.metrics[0].text)
         genome = self.bank.project_by_id()["genome-sequencing"]
         self.assertEqual(genome.metrics[0].kind, "absolute")
         self.assertIn("0.40", genome.metrics[0].text)

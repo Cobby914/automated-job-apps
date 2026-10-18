@@ -228,7 +228,10 @@ class LoaderTests(unittest.TestCase):
         swe = load_resume(ROOT / "resume_templates" / "swe.yaml")
         ai_companies = {item.company for item in ai.experience}
         swe_companies = {item.company for item in swe.experience}
-        self.assertIn("University of California, Irvine", ai_companies)
+        self.assertNotIn("University of California, Irvine", ai_companies)
+        self.assertEqual(ai.research[0].company, "University of California, Irvine")
+        self.assertEqual(ai.research[0].role, "Research Assistant")
+        self.assertEqual(swe.research, [])
         self.assertNotIn("University of California, Irvine", swe_companies)
         self.assertIn("FiPET", swe_companies)
         self.assertNotIn("FiPET", ai_companies)
@@ -354,10 +357,55 @@ questions:
             self.assertIn("Java, Python, C/C++, SQL, JavaScript, HTML/CSS, TypeScript, Assembly", resume_text)
             self.assertNotIn("built-in method", resume_text)
             self.assertIn("Canvas API, Notion API", resume_text)
+            self.assertNotIn("\\section{Awards}", resume_text)
+            self.assertLess(resume_text.index("\\section{Experience}"), resume_text.index("\\section{Projects}"))
+            self.assertNotIn("\\section{Research}", resume_text)
             self.assertIn("Dear Hiring Manager", cover_tex.read_text(encoding="utf-8"))
             cover_body = cover_tex.read_text(encoding="utf-8")
             self.assertTrue(
                 "Times New Roman" in cover_body or "TeX Gyre Termes" in cover_body
+            )
+
+            ai = load_resume(ROOT / "resume_templates" / "ai.yaml")
+            ai_tailored = TailoredResume(
+                summary=ai.summary,
+                experience=ai.experience,
+                research=ai.research,
+                projects=ai.projects,
+                education=ai.education,
+                skills=ai.skills,
+            )
+            ai_tex, _cover = render_documents(
+                job,
+                ai.contact,
+                ai_tailored,
+                None,
+                Path(tmp) / "ai",
+                template_name="ai",
+                compile_pdf=False,
+            )
+            ai_text = ai_tex.read_text(encoding="utf-8")
+            self.assertLess(ai_text.index("\\section{Research}"), ai_text.index("\\section{Experience}"))
+            self.assertLess(ai_text.index("\\section{Experience}"), ai_text.index("\\section{Projects}"))
+            self.assertIn("Research Assistant", ai_text)
+            self.assertNotIn("\\section{Awards}", ai_text)
+            default_tex, _cover = render_documents(
+                job,
+                ai.contact,
+                ai_tailored,
+                None,
+                Path(tmp) / "default",
+                template_name="swe",
+                compile_pdf=False,
+            )
+            default_text = default_tex.read_text(encoding="utf-8")
+            self.assertLess(
+                default_text.index("\\section{Experience}"),
+                default_text.index("\\section{Research}"),
+            )
+            self.assertLess(
+                default_text.index("\\section{Research}"),
+                default_text.index("\\section{Projects}"),
             )
 
     def test_resume_context_exposes_project_stack(self) -> None:
@@ -381,7 +429,8 @@ questions:
         self.assertEqual(context["projects"][0]["stack"], "Python, Canvas API, Notion API.")
         self.assertEqual(context["projects"][0]["bullets"], ["Built a sync engine."])
         self.assertEqual(context["skills"][0]["items"], "Python, TypeScript")
-        self.assertIn("Dean's Honor List", context["awards"])
+        self.assertEqual(context["awards"], [])
+        self.assertEqual(context["research"], [])
 
     def test_render_normalizes_inline_whitespace_without_changing_content(self) -> None:
         from jobapps.latex import _resume_context

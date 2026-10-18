@@ -233,21 +233,58 @@ def merge_fitted_into_draft(draft: DraftResume, resume: TailoredResume) -> Draft
                     bullets=bullets,
                 )
             )
+    research_lookup = {(item.company, item.role): item for item in draft.research}
+    research: list[DraftExperience] = []
+    for item in resume.research:
+        orig = research_lookup.get((item.company, item.role))
+        bullets = _merge_sourced_bullets(orig.bullets if orig else [], item.bullets)
+        if orig is not None:
+            research.append(orig.model_copy(update={"bullets": bullets}))
+        else:
+            research.append(
+                DraftExperience(
+                    company=item.company,
+                    role=item.role,
+                    location=item.location,
+                    start=item.start,
+                    end=item.end,
+                    bullets=bullets,
+                )
+            )
     proj_lookup = {item.name: item for item in draft.projects}
     projects: list[DraftProject] = []
     for item in resume.projects:
         orig = proj_lookup.get(item.name)
         bullets = _merge_sourced_bullets(orig.bullets if orig else [], item.bullets)
         if orig is not None:
-            projects.append(orig.model_copy(update={"bullets": bullets, "url": item.url}))
+            projects.append(
+                orig.model_copy(
+                    update={
+                        "bullets": bullets,
+                        "url": item.url,
+                        "start": item.start,
+                        "end": item.end,
+                    }
+                )
+            )
         else:
-            projects.append(DraftProject(name=item.name, url=item.url, bullets=bullets))
+            projects.append(
+                DraftProject(
+                    name=item.name,
+                    url=item.url,
+                    start=item.start,
+                    end=item.end,
+                    bullets=bullets,
+                )
+            )
     return draft.model_copy(
         update={
             "summary": resume.summary,
             "experience": experiences,
+            "research": research,
             "projects": projects,
             "education": resume.education,
+            "awards": list(resume.awards),
             "skills": resume.skills,
         }
     )
@@ -329,6 +366,26 @@ def _repair_overlong_bullets(
                 break
             if updated:
                 break
+        if updated:
+            continue
+        research = list(draft.research)
+        for research_index, item in enumerate(research):
+            bullets = list(item.bullets)
+            for bullet_index, bullet in enumerate(bullets):
+                if is_stack_bullet(bullet.text):
+                    continue
+                if len(bullet.text) <= max_chars:
+                    continue
+                record = _experience_record(bank, item.company, item.role)
+                shortened = shorten_bullet(bullet.text, max_chars=max_chars, record=record)
+                bullets[bullet_index] = bullet.model_copy(update={"text": shortened})
+                research[research_index] = item.model_copy(update={"bullets": bullets})
+                draft = draft.model_copy(update={"research": research})
+                rewrites += 1
+                updated = True
+                break
+            if updated:
+                break
         if not updated:
             break
     return draft, rewrites
@@ -354,6 +411,19 @@ def _experience_index_for_id(draft: DraftResume, bank: CareerBank, item_id: str)
     return None
 
 
+def _research_index_for_id(draft: DraftResume, bank: CareerBank, item_id: str) -> int | None:
+    record = bank.experience_by_id().get(item_id)
+    if record is None or record.section != "research":
+        return None
+    for index, item in enumerate(draft.research):
+        if item.company == record.company and item.role == record.role:
+            return index
+    for index, item in enumerate(draft.research):
+        if item.company == record.company:
+            return index
+    return None
+
+
 def _project_index_for_id(draft: DraftResume, bank: CareerBank, item_id: str) -> int | None:
     record = bank.project_by_id().get(item_id)
     if record is None:
@@ -372,6 +442,14 @@ def _resolve_review_issue(
     item_id = issue.item_id.strip()
     section = issue.section.strip().casefold()
     if item_id:
+        research_index = _research_index_for_id(draft, bank, item_id)
+        if research_index is not None:
+            return ParsedLocation(
+                kind="research",
+                item_index=research_index,
+                part_index=issue.bullet_index or 0,
+                item_id=item_id,
+            )
         exp_index = _experience_index_for_id(draft, bank, item_id)
         if exp_index is not None:
             return ParsedLocation(
@@ -393,9 +471,9 @@ def _resolve_review_issue(
             kind="cover_letter",
             part_index=issue.paragraph_index or 0,
         )
-    if section in {"experience", "project"} and issue.bullet_index is not None:
+    if section in {"experience", "research", "project"} and issue.bullet_index is not None:
         loc = parse_issue_location(issue.location)
-        if loc is not None and loc.kind in {"experience", "project"}:
+        if loc is not None and loc.kind in {"experience", "research", "project"}:
             return loc
     return parse_issue_location(issue.location)
 
@@ -421,6 +499,29 @@ def _repair_experience_bullet(
     experiences = list(draft.experience)
     experiences[item_index] = item.model_copy(update={"bullets": bullets})
     return draft.model_copy(update={"experience": experiences}), 1
+
+
+def _repair_research_bullet(
+    draft: DraftResume,
+    item_index: int,
+    bullet_index: int,
+    feedback: str,
+    bank: CareerBank,
+) -> tuple[DraftResume, int]:
+    if item_index < 0 or item_index >= len(draft.research):
+        return draft, 0
+    item = draft.research[item_index]
+    if bullet_index < 0 or bullet_index >= len(item.bullets):
+        return draft, 0
+    if is_stack_bullet(item.bullets[bullet_index].text):
+        return draft, 0
+    record = _experience_record(bank, item.company, item.role)
+    new_text = rewrite_bullet(item.bullets[bullet_index].text, feedback, record=record)
+    bullets = list(item.bullets)
+    bullets[bullet_index] = bullets[bullet_index].model_copy(update={"text": new_text})
+    research = list(draft.research)
+    research[item_index] = item.model_copy(update={"bullets": bullets})
+    return draft.model_copy(update={"research": research}), 1
 
 
 def _repair_project_bullet(
@@ -485,6 +586,13 @@ def _repair_from_review(
             bullet_rewrites += rewritten
             repaired = repaired or bool(rewritten)
             continue
+        if loc is not None and loc.kind == "research" and bullet_rewrites < MAX_BULLET_REPAIRS:
+            draft, rewritten = _repair_research_bullet(
+                draft, loc.item_index, loc.part_index, feedback, bank
+            )
+            bullet_rewrites += rewritten
+            repaired = repaired or bool(rewritten)
+            continue
         if loc is not None and loc.kind == "project" and bullet_rewrites < MAX_BULLET_REPAIRS:
             draft, rewritten = _repair_project_bullet(
                 draft, loc.item_index, loc.part_index, feedback, bank
@@ -508,6 +616,11 @@ def _repair_from_review(
         kind, item_index, bullet_index = longest
         if kind == "experience":
             draft, rewritten = _repair_experience_bullet(
+                draft, item_index, bullet_index, feedback, bank
+            )
+            return draft, cover, rewritten, 0
+        if kind == "research":
+            draft, rewritten = _repair_research_bullet(
                 draft, item_index, bullet_index, feedback, bank
             )
             return draft, cover, rewritten, 0
@@ -547,6 +660,13 @@ def _set_resume_bullet(
         experiences = list(resume.experience)
         experiences[item_index] = item.model_copy(update={"bullets": bullets})
         return resume.model_copy(update={"experience": experiences})
+    if kind == "research":
+        item = resume.research[item_index]
+        bullets = list(item.bullets)
+        bullets[bullet_index] = text
+        research = list(resume.research)
+        research[item_index] = item.model_copy(update={"bullets": bullets})
+        return resume.model_copy(update={"research": research})
     item = resume.projects[item_index]
     bullets = list(item.bullets)
     bullets[bullet_index] = text
@@ -643,6 +763,15 @@ def _render_and_fit(
                         if item_index < len(plan.experience_ids)
                         else item.company
                     )
+                elif kind == "research":
+                    item = resume.research[item_index]
+                    record = _experience_record(bank, item.company, item.role)
+                    current = item.bullets[bullet_index]
+                    item_id = (
+                        plan.research_ids[item_index]
+                        if item_index < len(plan.research_ids)
+                        else item.company
+                    )
                 else:
                     item = resume.projects[item_index]
                     record = _project_record(bank, item.name)
@@ -663,7 +792,7 @@ def _render_and_fit(
                 report_out.changes.append(
                     FitChange(
                         action="shortened_bullet",
-                        section="experience" if kind == "experience" else "project",
+                        section=kind if kind in {"experience", "research"} else "project",
                         item_id=item_id,
                         item_index=item_index,
                         bullet_index=bullet_index,
@@ -798,7 +927,7 @@ def process_job_file(job_path: Path) -> ProcessResult:
         metrics.project_count = len(plan.project_ids)
         metrics.selected_experiences = len(plan.experience_ids)
         metrics.selected_projects = len(plan.project_ids)
-        metrics.candidate_experiences = len(bank.experiences)
+        metrics.candidate_experiences = len(bank.work_experiences())
         metrics.candidate_projects = len(bank.projects)
         persist("planned")
         stage = "planned"
@@ -810,7 +939,7 @@ def process_job_file(job_path: Path) -> ProcessResult:
         draft, context_chars = generate_resume_draft(job, plan, bank)
         metrics.generation_attempts += 1
         metrics.context_chars = context_chars
-        draft = apply_mechanical_fixes(draft, plan, bank.profile.education, stacks)
+        draft = apply_mechanical_fixes(draft, plan, bank.profile.education, stacks, bank)
         draft = draft.model_copy(
             update={"education": set_education_year(draft.education, graduation_year)}
         )
@@ -819,7 +948,7 @@ def process_job_file(job_path: Path) -> ProcessResult:
         )
         metrics.bullet_rewrites += bullet_rewrites
         metrics.generation_attempts += bullet_rewrites
-        draft = apply_mechanical_fixes(draft, plan, bank.profile.education, stacks)
+        draft = apply_mechanical_fixes(draft, plan, bank.profile.education, stacks, bank)
         issues = validate_draft_resume(draft, plan, allowed, bank.profile, bank)
         metrics.validation_failures += len(issues)
         if issues:
@@ -894,7 +1023,7 @@ def process_job_file(job_path: Path) -> ProcessResult:
             metrics.cover_letter_repairs += extra_cover
             metrics.semantic_revisions += 1
             metrics.generation_attempts += extra_bullets + extra_cover
-            draft = apply_mechanical_fixes(draft, plan, bank.profile.education, stacks)
+            draft = apply_mechanical_fixes(draft, plan, bank.profile.education, stacks, bank)
             draft, extra_long = _repair_overlong_bullets(
                 draft, plan, bank, MAX_BULLET_REPAIRS
             )

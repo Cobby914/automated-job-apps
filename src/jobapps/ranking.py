@@ -7,7 +7,13 @@ import re
 from dataclasses import dataclass
 from datetime import datetime
 
-from jobapps.career import CareerBank, ExperienceRecord, ProjectRecord, SkillsInventory
+from jobapps.career import (
+    CareerBank,
+    CourseRecord,
+    ExperienceRecord,
+    ProjectRecord,
+    SkillsInventory,
+)
 from jobapps.config import RANKING_LOG_PATH
 from jobapps.models import (
     AUTO_TEMPLATE_ALIASES,
@@ -112,6 +118,51 @@ _SCORE_MARGIN = 2
 MIN_ABSOLUTE_SCORE = 4.0
 MIN_SCORE_RATIO = 0.35
 MAX_SKILLS_PER_GROUP = 5
+MAX_COURSES = 6
+
+# Prefer advanced / role-specific courses when a track has many matches.
+_COURSE_PRIORITY = {
+    "swe": [
+        "compsci-161",
+        "ics-46",
+        "informatics-43",
+        "ics-53",
+        "ics-51",
+        "ics-45c",
+        "ics-6d",
+        "ics-6b",
+        "compsci-147",
+        "ics-33",
+        "ics-32a",
+    ],
+    "ai": [
+        "compsci-175",
+        "compsci-178",
+        "compsci-171",
+        "compsci-116",
+        "compsci-179",
+        "compsci-189",
+        "compsci-183",
+        "compsci-184a",
+        "compsci-161",
+        "ics-46",
+        "stats-67",
+        "math-3a",
+    ],
+    "default": [
+        "compsci-178",
+        "compsci-189",
+        "compsci-179",
+        "compsci-161",
+        "ics-46",
+        "stats-67",
+        "compsci-183",
+        "math-3a",
+        "ics-53",
+        "informatics-43",
+        "ics-32a",
+    ],
+}
 
 _CATEGORY_ALIASES = {
     "backend & apis": "Backend/Data",
@@ -252,7 +303,9 @@ def score_record(job: Job, record: ExperienceRecord | ProjectRecord, template: s
 
 
 def rank_experiences(job: Job, bank: CareerBank, template: str) -> list[RankedItem]:
-    ranked = [score_record_detailed(job, record, template) for record in bank.experiences]
+    ranked = [
+        score_record_detailed(job, record, template) for record in bank.work_experiences()
+    ]
     ranked.sort(key=lambda item: (-item.score, item.record_id))
     return ranked
 
@@ -293,6 +346,40 @@ def _normalize_skill(name: str) -> str:
 def _compact_category(heading: str) -> str:
     key = heading.strip().casefold()
     return _CATEGORY_ALIASES.get(key, heading.strip())
+
+
+def select_courses(
+    courses: list[CourseRecord],
+    template: str,
+    *,
+    max_count: int = MAX_COURSES,
+) -> list[str]:
+    """Pick resume-friendly course names for the selected track."""
+    track = template.strip().casefold() or "default"
+    priority = _COURSE_PRIORITY.get(track, _COURSE_PRIORITY["default"])
+    priority_rank = {course_id: index for index, course_id in enumerate(priority)}
+    eligible = [
+        course
+        for course in courses
+        if not course.tracks or track in {item.casefold() for item in course.tracks}
+    ]
+    eligible.sort(
+        key=lambda course: (
+            priority_rank.get(course.id, len(priority)),
+            course.name.casefold(),
+        )
+    )
+    names: list[str] = []
+    seen: set[str] = set()
+    for course in eligible:
+        key = course.name.strip().casefold()
+        if not key or key in seen:
+            continue
+        names.append(course.name.strip())
+        seen.add(key)
+        if len(names) >= max_count:
+            break
+    return names
 
 
 def select_skills(job: Job, skills: SkillsInventory, template: str) -> list[SkillGroup]:
@@ -339,6 +426,9 @@ def select_skills(job: Job, skills: SkillsInventory, template: str) -> list[Skil
                     names.append(item)
         if not names:
             continue
+        # Skip one-item leftover groups; they add clutter for little signal.
+        if len(names) < 2 and category not in {g.category for g in recommended[:3]}:
+            continue
         groups.append(
             SkillGroup(
                 category=category,
@@ -352,10 +442,19 @@ def select_skills(job: Job, skills: SkillsInventory, template: str) -> list[Skil
         for group in recommended:
             if all(g.category != group.category for g in groups):
                 names = split_skill_items(group.items)[:MAX_SKILLS_PER_GROUP]
+                if len(names) < 2:
+                    continue
                 groups.append(SkillGroup(category=group.category, items=", ".join(names)))
             if len(groups) >= 3:
                 break
-    return groups[:5]
+
+    # Prefer fuller groups; drop singleton lines unless needed for the minimum.
+    full = [group for group in groups if len(split_skill_items(group.items)) >= 2]
+    thin = [group for group in groups if len(split_skill_items(group.items)) < 2]
+    compacted = full + thin
+    if len(full) >= 3:
+        compacted = full
+    return compacted[:5]
 
 
 def append_ranking_log(
