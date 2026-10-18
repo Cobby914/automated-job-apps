@@ -100,11 +100,9 @@ Optional: `template: auto` (default) scores the job description with token/phras
 
 Set `cover_letter: false` to skip cover-letter generation, review, and PDF.
 
-Graduation date is **June 2028** for every internship and co-op, and for other
-roles that start in Summer 2027 or later. **June 2027** is used for 2027 new-grad
-roles, for non-intern roles that start before summer 2027, and when the role type
-and start date are unknown. `Dec. 2027` is accepted only as an explicit override.
-Optional fields:
+Graduation date is **June 2028** for every role: internships, co-ops, new-grad,
+full-time, and postings with no start date. `June 2027` and `Dec. 2027` are
+rejected, including as an explicit override. Optional fields:
 
 ```yaml
 starts: Summer 2027

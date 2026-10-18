@@ -12,8 +12,6 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jobapps.config import COVER_LETTER_EXAMPLES_DIR, WRITING_SAMPLES_DIR
 from jobapps.graduation import (
-    GRADUATION_DEC,
-    GRADUATION_JUNE,
     GRADUATION_JUNE_2028,
     apply_graduation,
     resolve_graduation_date,
@@ -60,86 +58,56 @@ class GraduationTests(unittest.TestCase):
         base.update(kwargs)
         return Job.model_validate(base)
 
-    def test_internship_defaults_to_june_2028(self) -> None:
-        self.assertEqual(resolve_graduation_date(self._job()), GRADUATION_JUNE_2028)
+    def test_every_role_uses_june_2028(self) -> None:
+        cases = [
+            {},
+            {"title": "Software Engineer"},
+            {"title": "Software Engineer, New Grad"},
+            {"title": "Software Engineer - New Graduate", "starts": "Summer 2027"},
+            {"title": "Software Engineer", "notes": "Recent graduate role"},
+            {"title": "Software Engineer", "starts": "Spring 2027"},
+            {"title": "Software Engineer", "starts": "June 2027"},
+            {"title": "Software Engineer", "starts": "Fall 2027"},
+            {"title": "Software Engineer", "starts": "September 2027"},
+            {"title": "Software Engineer Co-op", "starts": "Winter 2027"},
+            {"title": "Internal Tools Engineer"},
+            {"notes": "Summer 2027 internship for graduating seniors."},
+            {"title": "Software Engineer, New Grad", "graduation": "June 2028"},
+            {"graduation": "Jun. 2028"},
+        ]
+        for kwargs in cases:
+            with self.subTest(kwargs=kwargs):
+                self.assertEqual(
+                    resolve_graduation_date(self._job(**kwargs)),
+                    GRADUATION_JUNE_2028,
+                )
 
-    def test_non_intern_defaults_to_june_2027(self) -> None:
-        job = self._job(title="Software Engineer")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE)
-
-    def test_summer_internship_maps_to_june_2028(self) -> None:
-        job = self._job(notes="Summer 2027 internship for graduating seniors.")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE_2028)
-
-    def test_june_start_maps_to_june_2028(self) -> None:
-        job = self._job(title="Software Engineer", starts="June 2027")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE_2028)
-
-    def test_new_grad_maps_to_june(self) -> None:
-        job = self._job(title="Software Engineer, New Grad")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE)
-
-    def test_new_grad_takes_priority_over_summer_start(self) -> None:
-        job = self._job(title="Software Engineer - New Graduate", starts="Summer 2027")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE)
-
-    def test_recent_grad_maps_to_june(self) -> None:
-        job = self._job(title="Software Engineer", notes="Recent graduate role")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE)
-
-    def test_fall_start_maps_to_june_2028(self) -> None:
-        job = self._job(title="Software Engineer", starts="Fall 2027")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE_2028)
-
-    def test_september_start_maps_to_june_2028(self) -> None:
-        job = self._job(title="Software Engineer", starts="September 2027")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE_2028)
-
-    def test_spring_non_intern_stays_june_2027(self) -> None:
-        job = self._job(title="Software Engineer", starts="Spring 2027")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE)
-
-    def test_coop_maps_to_june_2028(self) -> None:
-        job = self._job(title="Software Engineer Co-op", starts="Winter 2027")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE_2028)
-
-    def test_internal_tools_is_not_an_internship(self) -> None:
-        job = self._job(title="Internal Tools Engineer")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE)
-
-    def test_explicit_override(self) -> None:
-        job = self._job(starts="Fall 2027", graduation="June 2027")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE)
-
-    def test_explicit_june_2028_override(self) -> None:
-        job = self._job(title="Software Engineer, New Grad", graduation="June 2028")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE_2028)
-
-    def test_legacy_dec_override_still_accepted(self) -> None:
-        job = self._job(title="Software Engineer", graduation="Dec. 2027")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_DEC)
-
-    def test_rejects_bad_override(self) -> None:
-        with self.assertRaises(ValueError):
-            resolve_graduation_date(self._job(graduation="May 2028"))
+    def test_rejects_retired_and_unknown_dates(self) -> None:
+        for value in ("Dec. 2027", "December 2027", "June 2027", "May 2028"):
+            with self.subTest(value=value):
+                with self.assertRaises(ValueError):
+                    resolve_graduation_date(self._job(graduation=value))
 
     def test_rewrites_cover_letter_mentions(self) -> None:
         text = rewrite_graduation_mentions(
             "I am graduating in June 2027 and also mentioned December 2027.",
-            GRADUATION_DEC,
+            GRADUATION_JUNE_2028,
         )
-        self.assertEqual(text, "I am graduating in Dec. 2027 and also mentioned Dec. 2027.")
+        self.assertEqual(
+            text,
+            "I am graduating in June 2028 and also mentioned June 2028.",
+        )
         later = rewrite_graduation_mentions(
             "I graduate in June 2028, not December 2028.",
-            GRADUATION_JUNE,
+            GRADUATION_JUNE_2028,
         )
-        self.assertEqual(later, "I graduate in June 2027, not June 2027.")
+        self.assertEqual(later, "I graduate in June 2028, not June 2028.")
 
     def test_apply_graduation_updates_resume_and_letter(self) -> None:
         materials = GenerationResult(
             resume=TailoredResume(
                 experience=[],
-                education=[Education(school="UCI", degree="BS", year=GRADUATION_JUNE)],
+                education=[Education(school="UCI", degree="BS", year="June 2027")],
             ),
             cover_letter=CoverLetter(
                 greeting="Dear Hiring Manager,",
@@ -147,9 +115,9 @@ class GraduationTests(unittest.TestCase):
                 closing="Sincerely,",
             ),
         )
-        updated = apply_graduation(materials, GRADUATION_DEC)
-        self.assertEqual(updated.resume.education[0].year, GRADUATION_DEC)
-        self.assertEqual(updated.cover_letter.paragraphs[0], "I graduate in Dec. 2027.")
+        updated = apply_graduation(materials, GRADUATION_JUNE_2028)
+        self.assertEqual(updated.resume.education[0].year, GRADUATION_JUNE_2028)
+        self.assertEqual(updated.cover_letter.paragraphs[0], "I graduate in June 2028.")
 
 
 class LatexTests(unittest.TestCase):

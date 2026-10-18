@@ -259,7 +259,7 @@ class PipelineIntegrationTests(unittest.TestCase):
                         "output_dir": str(destination),
                         "stage": "reviewed",
                         "template_request": "auto",
-                        "graduation_year": "June 2027",
+                        "graduation_year": "June 2028",
                         "checker_model": "claude-4.5-sonnet",
                         "escalated": False,
                         "metrics": {},

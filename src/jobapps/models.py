@@ -113,9 +113,9 @@ class Job(BaseModel):
     notes: str = ""
     template: str = "auto"
     # Optional role start hint, e.g. "Summer 2027", "Fall 2027", "2027-09".
+    # Does not change the graduation date.
     starts: str = ""
-    # Optional force: "June 2027", "June 2028", or legacy "Dec. 2027".
-    # When empty, inferred from the role title and start date.
+    # Optional. When set, must be "June 2028". Every role uses June 2028.
     graduation: str = ""
     # Skip cover-letter generation, review, and PDF when false.
     cover_letter: bool = True

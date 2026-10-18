@@ -76,7 +76,7 @@ technical experience or project; optional research/project depth; company-specif
 - Closing should be "Sincerely,"
 - Match the example's tone, not its company-specific content; the 280-300 word limit \
 wins over the example's length.
-- Use the exact education year from the resume (June 2027 or June 2028).
+- Use the exact education year from the resume (June 2028).
 - Do not mention that you are an AI.
 - Do not edit files, run commands, or use tools.
 """
