@@ -82,6 +82,7 @@ from jobapps.validate import (
     MAX_ANSWER_REPAIRS,
     MAX_BULLET_REPAIRS,
     MAX_COVER_LETTER_REPAIRS,
+    MAX_COVER_FIT_LLM_REPAIRS,
     MAX_PAGE_FIT_REPAIRS,
     MAX_PDF_FIT_LLM_REPAIRS,
     MAX_SEMANTIC_REVISIONS,
@@ -742,11 +743,14 @@ def _render_and_fit(
                 report_out.changes.append(change)
                 continue
 
-        if llm_fit >= MAX_PDF_FIT_LLM_REPAIRS or page_fit >= MAX_PAGE_FIT_REPAIRS:
+        cover_only = report.cover_overflow and not report.resume_overflow
+        llm_limit = MAX_COVER_FIT_LLM_REPAIRS if cover_only else MAX_PDF_FIT_LLM_REPAIRS
+        page_limit = MAX_COVER_FIT_LLM_REPAIRS if cover_only else MAX_PAGE_FIT_REPAIRS
+        if llm_fit >= llm_limit or page_fit >= page_limit:
             raise PipelineError(
                 PDF_OVERFLOW,
                 "Resume/cover letter still exceed 1 page after "
-                f"{MAX_PDF_FIT_LLM_REPAIRS} LLM repairs: "
+                f"{llm_fit} LLM repairs: "
                 + "; ".join(_overflow_issues(report, cover is not None)),
             )
 
@@ -809,7 +813,15 @@ def _render_and_fit(
                 continue
 
         if cover is not None and report.cover_overflow:
-            cover = shorten_cover_letter(cover)
+            cover_attempts = sum(
+                1 for change in report_out.changes if change.action == "shortened_cover_letter"
+            )
+            cover = shorten_cover_letter(
+                cover,
+                pages=report.cover_pages,
+                overfull=report.cover_overfull,
+                attempt=cover_attempts + 1,
+            )
             page_fit += 1
             llm_fit += 1
             metrics.cover_letter_repairs += 1

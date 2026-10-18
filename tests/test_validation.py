@@ -18,6 +18,8 @@ from jobapps.models import (
     Project,
     SkillGroup,
     TailoredResume,
+    numeric_claim_tokens,
+    numeric_percent_flags,
     overlong_bullet_issues,
 )
 from jobapps.validate import validate_cover_letter, validate_resume
@@ -132,6 +134,23 @@ class ResumeValidationTests(unittest.TestCase):
             )
             job = load_job(path)
         self.assertFalse(job.cover_letter)
+
+
+class NumericClaimTests(unittest.TestCase):
+    def test_version_identifiers_are_not_claims(self) -> None:
+        text = "Scored variants with dbNSFP 5.3a, v2, and 3.11.4."
+        self.assertEqual(numeric_claim_tokens(text), [])
+        self.assertEqual(numeric_percent_flags(text), {})
+
+    def test_metrics_still_flagged_beside_versions(self) -> None:
+        text = "dbNSFP 5.3a lifted F1 by 25% across 30K variants versus v2 and 3.11.4."
+        self.assertEqual(numeric_claim_tokens(text), ["25", "30"])
+        self.assertEqual(numeric_percent_flags(text), {"25": True, "30": False})
+
+    def test_plain_decimals_and_comma_numbers_stay_claims(self) -> None:
+        self.assertEqual(numeric_claim_tokens("F1 rose from 0.40 to 0.70."), ["0.4", "0.7"])
+        self.assertEqual(numeric_claim_tokens("Served 1,200 users on Python 3.11."), ["1200", "3.11"])
+        self.assertEqual(numeric_claim_tokens("Graduating June 2028."), [])
 
 
 if __name__ == "__main__":

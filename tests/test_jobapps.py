@@ -14,6 +14,7 @@ from jobapps.config import COVER_LETTER_EXAMPLES_DIR, WRITING_SAMPLES_DIR
 from jobapps.graduation import (
     GRADUATION_DEC,
     GRADUATION_JUNE,
+    GRADUATION_JUNE_2028,
     apply_graduation,
     resolve_graduation_date,
     rewrite_graduation_mentions,
@@ -59,16 +60,20 @@ class GraduationTests(unittest.TestCase):
         base.update(kwargs)
         return Job.model_validate(base)
 
-    def test_defaults_to_june_when_unknown(self) -> None:
-        self.assertEqual(resolve_graduation_date(self._job()), GRADUATION_JUNE)
+    def test_internship_defaults_to_june_2028(self) -> None:
+        self.assertEqual(resolve_graduation_date(self._job()), GRADUATION_JUNE_2028)
 
-    def test_summer_maps_to_dec(self) -> None:
+    def test_non_intern_defaults_to_june_2027(self) -> None:
+        job = self._job(title="Software Engineer")
+        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE)
+
+    def test_summer_internship_maps_to_june_2028(self) -> None:
         job = self._job(notes="Summer 2027 internship for graduating seniors.")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_DEC)
+        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE_2028)
 
-    def test_june_maps_to_dec(self) -> None:
-        job = self._job(starts="June 2027")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_DEC)
+    def test_june_start_maps_to_june_2028(self) -> None:
+        job = self._job(title="Software Engineer", starts="June 2027")
+        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE_2028)
 
     def test_new_grad_maps_to_june(self) -> None:
         job = self._job(title="Software Engineer, New Grad")
@@ -78,17 +83,41 @@ class GraduationTests(unittest.TestCase):
         job = self._job(title="Software Engineer - New Graduate", starts="Summer 2027")
         self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE)
 
-    def test_fall_maps_to_dec(self) -> None:
-        job = self._job(starts="Fall 2027")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_DEC)
+    def test_recent_grad_maps_to_june(self) -> None:
+        job = self._job(title="Software Engineer", notes="Recent graduate role")
+        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE)
 
-    def test_september_maps_to_dec(self) -> None:
-        job = self._job(starts="September 2027")
-        self.assertEqual(resolve_graduation_date(job), GRADUATION_DEC)
+    def test_fall_start_maps_to_june_2028(self) -> None:
+        job = self._job(title="Software Engineer", starts="Fall 2027")
+        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE_2028)
+
+    def test_september_start_maps_to_june_2028(self) -> None:
+        job = self._job(title="Software Engineer", starts="September 2027")
+        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE_2028)
+
+    def test_spring_non_intern_stays_june_2027(self) -> None:
+        job = self._job(title="Software Engineer", starts="Spring 2027")
+        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE)
+
+    def test_coop_maps_to_june_2028(self) -> None:
+        job = self._job(title="Software Engineer Co-op", starts="Winter 2027")
+        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE_2028)
+
+    def test_internal_tools_is_not_an_internship(self) -> None:
+        job = self._job(title="Internal Tools Engineer")
+        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE)
 
     def test_explicit_override(self) -> None:
         job = self._job(starts="Fall 2027", graduation="June 2027")
         self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE)
+
+    def test_explicit_june_2028_override(self) -> None:
+        job = self._job(title="Software Engineer, New Grad", graduation="June 2028")
+        self.assertEqual(resolve_graduation_date(job), GRADUATION_JUNE_2028)
+
+    def test_legacy_dec_override_still_accepted(self) -> None:
+        job = self._job(title="Software Engineer", graduation="Dec. 2027")
+        self.assertEqual(resolve_graduation_date(job), GRADUATION_DEC)
 
     def test_rejects_bad_override(self) -> None:
         with self.assertRaises(ValueError):
@@ -100,6 +129,11 @@ class GraduationTests(unittest.TestCase):
             GRADUATION_DEC,
         )
         self.assertEqual(text, "I am graduating in Dec. 2027 and also mentioned Dec. 2027.")
+        later = rewrite_graduation_mentions(
+            "I graduate in June 2028, not December 2028.",
+            GRADUATION_JUNE,
+        )
+        self.assertEqual(later, "I graduate in June 2027, not June 2027.")
 
     def test_apply_graduation_updates_resume_and_letter(self) -> None:
         materials = GenerationResult(

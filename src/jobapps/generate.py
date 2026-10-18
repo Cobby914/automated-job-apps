@@ -68,13 +68,15 @@ Rules:
 - Never invent employers, titles, dates, degrees, schools, projects, skills, or outcomes.
 - Ground every claim in the finalized resume or the supporting records.
 - First person, specific, no cliches, not a rewrite of the resume.
-- Write 4-6 substantive paragraphs that fill most of one page.
+- Write 4 substantive paragraphs, about 280-300 words total in the body, so the letter \
+and its signature fit on one page.
 - Structure: connection to the role/company; strongest relevant experience; second \
 technical experience or project; optional research/project depth; company-specific close.
 - Greeting should be "Dear Hiring Manager," unless the job text names a person.
 - Closing should be "Sincerely,"
-- Match the example's length and tone, not its company-specific content.
-- Use the exact education year from the resume. Do not change June 2027 vs Dec. 2027.
+- Match the example's tone, not its company-specific content; the 280-300 word limit \
+wins over the example's length.
+- Use the exact education year from the resume (June 2027 or June 2028).
 - Do not mention that you are an AI.
 - Do not edit files, run commands, or use tools.
 """
