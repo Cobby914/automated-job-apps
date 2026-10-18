@@ -108,11 +108,48 @@ Supporting records:
     return _text_repair(system, user, "cover_paragraph_repair")
 
 
-def shorten_cover_letter(cover: CoverLetter) -> CoverLetter:
-    system = """\
-Shorten this cover letter so it fits on one page. Keep 4-6 substantive paragraphs. \
-Tighten wording; do not invent facts; do not drop below 4 paragraphs if the current \
-letter has 4 or more.
+COVER_LETTER_TARGET_WORDS = (280, 300)
+
+
+def cover_letter_word_count(cover: CoverLetter) -> int:
+    return sum(len(paragraph.split()) for paragraph in cover.paragraphs)
+
+
+def shorten_cover_letter(
+    cover: CoverLetter,
+    *,
+    pages: int | None = None,
+    overfull: list[str] | None = None,
+    attempt: int = 1,
+) -> CoverLetter:
+    """Cut the letter so the closing and signature stay on page 1.
+
+    Later attempts tighten the word target when the previous cut still overflowed.
+    """
+    low, high = COVER_LETTER_TARGET_WORDS
+    current = cover_letter_word_count(cover)
+    if attempt > 1:
+        low = max(200, low - 30 * (attempt - 1))
+        high = max(230, high - 30 * (attempt - 1))
+    problems: list[str] = []
+    if pages is not None and pages > 1:
+        problems.append(
+            f"The rendered PDF is {pages} pages; it must be exactly 1 page, and the "
+            "closing line and signature must stay on page 1."
+        )
+    if overfull:
+        problems.append(
+            "Some lines overflow the right margin; avoid long unbreakable tokens "
+            "(URLs, long hyphenated or slash-joined terms)."
+        )
+    problem_text = " ".join(problems) or "The letter does not fit on one page."
+    system = f"""\
+Shorten this cover letter so it fits on one page. {problem_text}
+The body (all paragraphs combined) is currently {current} words. Cut it to \
+{low}-{high} words total. Keep exactly 4 substantive paragraphs (never fewer); drop the \
+weakest material rather than trimming every sentence. Tighten wording; do not \
+invent facts; keep every remaining claim grounded in the current letter; keep \
+the greeting and closing unchanged.
 """
     user = f"""\
 Current letter:

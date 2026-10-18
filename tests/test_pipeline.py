@@ -4,6 +4,7 @@ import json
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
@@ -11,9 +12,10 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jobapps.career import load_career_bank
 from jobapps.dedup import find_duplicate, find_reusable_plan, job_fingerprint, strip_tracking_params
-from jobapps.errors import INVALID_PROVENANCE, PipelineError
+from jobapps.errors import INVALID_PROVENANCE, PDF_OVERFLOW, PipelineError
 from jobapps.models import (
     ApplicationPlan,
+    CoverLetter,
     DraftExperience,
     DraftProject,
     DraftResume,
@@ -21,12 +23,14 @@ from jobapps.models import (
     Experience,
     FitReport,
     Job,
+    PipelineMetrics,
     ReviewIssue,
     ReviewResult,
     SourcedBullet,
     TailoredResume,
 )
-from jobapps.pipeline import merge_fitted_into_draft, process_job_file
+from jobapps.pipeline import _render_and_fit, merge_fitted_into_draft, process_job_file
+from jobapps.validate import MAX_COVER_FIT_LLM_REPAIRS, MAX_PDF_FIT_LLM_REPAIRS
 from jobapps.plan import build_application_plan
 from jobapps.validate import validate_draft_resume
 
@@ -452,6 +456,96 @@ class PipelineIntegrationTests(unittest.TestCase):
             with patch("jobapps.pipeline.find_duplicate", return_value=root / "prior"):
                 result = process_job_file(job_path)
         self.assertTrue(result.skipped_duplicate)
+
+
+class CoverFitAttemptTests(unittest.TestCase):
+    def _resume(self) -> TailoredResume:
+        return TailoredResume(
+            experience=[
+                Experience(company="Acme", role="Engineer", bullets=["Built a Python service."])
+            ],
+            education=[Education(school="UCI", degree="B.S. Computer Science")],
+        )
+
+    def _cover(self) -> CoverLetter:
+        return CoverLetter(
+            greeting="Dear Hiring Manager,",
+            paragraphs=["One paragraph.", "Two paragraph.", "Three paragraph.", "Four paragraph."],
+            closing="Sincerely,",
+        )
+
+    def test_cover_only_overflow_allows_four_shorten_attempts(self) -> None:
+        self.assertEqual(MAX_COVER_FIT_LLM_REPAIRS, 4)
+        self.assertEqual(MAX_PDF_FIT_LLM_REPAIRS, 2)
+        calls: list[dict[str, object]] = []
+
+        def shorten(cover: CoverLetter, **kwargs: object) -> CoverLetter:
+            calls.append(kwargs)
+            return cover
+
+        def pages(path: Path) -> int:
+            return 2 if Path(path).name.startswith("cover") else 1
+
+        def compile_tex(path: Path) -> tuple[None, str]:
+            if Path(path).name.startswith("cover"):
+                return None, r"Overfull \hbox (12.5pt too wide) in paragraph"
+            return None, ""
+
+        job = Job(company="Acme", title="Software Engineer Intern", description="Build services.")
+        plan = ApplicationPlan(template="swe")
+        with TemporaryDirectory() as tmp:
+            with patch("jobapps.pipeline.render_documents"):
+                with patch("jobapps.pipeline._compile_tex", side_effect=compile_tex):
+                    with patch("jobapps.pipeline.pdf_page_count", side_effect=pages):
+                        with patch("jobapps.pipeline.shorten_cover_letter", side_effect=shorten):
+                            with self.assertRaises(PipelineError) as caught:
+                                _render_and_fit(
+                                    job,
+                                    None,
+                                    self._resume(),
+                                    self._cover(),
+                                    Path(tmp),
+                                    plan,
+                                    None,  # type: ignore[arg-type]
+                                    PipelineMetrics(),
+                                )
+        self.assertEqual(caught.exception.category, PDF_OVERFLOW)
+        self.assertIn("4 LLM repairs", str(caught.exception))
+        self.assertEqual([call["attempt"] for call in calls], [1, 2, 3, 4])
+        self.assertTrue(all(call["pages"] == 2 for call in calls))
+        self.assertTrue(all(call["overfull"] == ["12.5pt"] for call in calls))
+
+    def test_resume_overflow_keeps_the_two_attempt_cap(self) -> None:
+        bullet_calls = 0
+
+        def shorten_bullet(current: str, **_kwargs: object) -> str:
+            nonlocal bullet_calls
+            bullet_calls += 1
+            return current
+
+        job = Job(company="Acme", title="Software Engineer", description="Build services.")
+        plan = ApplicationPlan(template="swe")
+        bank = SimpleNamespace(experiences=[], projects=[])
+        with TemporaryDirectory() as tmp:
+            with patch("jobapps.pipeline.render_documents"):
+                with patch("jobapps.pipeline._compile_tex", return_value=(None, "")):
+                    with patch("jobapps.pipeline.pdf_page_count", return_value=2):
+                        with patch("jobapps.pipeline.shorten_bullet", side_effect=shorten_bullet):
+                            with patch("jobapps.pipeline.shorten_cover_letter") as shorten_cover:
+                                with self.assertRaises(PipelineError) as caught:
+                                    _render_and_fit(
+                                        job,
+                                        None,
+                                        self._resume(),
+                                        self._cover(),
+                                        Path(tmp),
+                                        plan,
+                                        bank,  # type: ignore[arg-type]
+                                        PipelineMetrics(),
+                                    )
+        self.assertEqual(caught.exception.category, PDF_OVERFLOW)
+        self.assertEqual(bullet_calls, MAX_PDF_FIT_LLM_REPAIRS)
+        shorten_cover.assert_not_called()
 
 
 if __name__ == "__main__":

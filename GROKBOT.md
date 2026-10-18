@@ -77,8 +77,8 @@ mv jobs/_acme-swe.yaml jobs/acme-swe.yaml
 | `portal_url` | Application link |
 | `notes` | Anything useful for the writer (referral context, location, etc.) |
 | `template` | `auto` (default), `swe`, `ai`, or `default` |
-| `starts` | e.g. `Summer 2027`, `Fall 2027`, `2027-09` — Summer 2027 or later uses December unless it is a new-grad role |
-| `graduation` | Force `June 2027` or `Dec. 2027` (overrides inference) |
+| `starts` | e.g. `Summer 2027`, `Fall 2027`, `2027-09`. Internships and co-ops use June 2028 in any season. Other roles starting Summer 2027 or later use June 2028; earlier starts and 2027 new-grad roles use June 2027. |
+| `graduation` | Force `June 2027`, `June 2028`, or legacy `Dec. 2027` (overrides inference) |
 | `questions` | Screening prompts; each needs `prompt`, optional `max_length` |
 
 ### Minimal example

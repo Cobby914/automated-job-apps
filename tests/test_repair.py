@@ -8,7 +8,9 @@ from unittest.mock import patch
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / "src"))
 
 from jobapps.career import load_career_bank
+from jobapps.generate import COVER_LETTER_WRITER_PROMPT
 from jobapps.models import (
+    CoverLetter,
     DraftExperience,
     DraftProject,
     DraftResume,
@@ -18,6 +20,7 @@ from jobapps.models import (
     SourcedBullet,
     parse_issue_location,
 )
+from jobapps.repair import cover_letter_word_count, shorten_cover_letter
 from jobapps.pipeline import _repair_from_review
 from jobapps.plan import build_application_plan
 
@@ -166,6 +169,45 @@ class RepairTests(unittest.TestCase):
         self.assertEqual(issue.section, "experience")
         self.assertEqual(issue.item_id, "uci-scalesense")
         self.assertEqual(issue.bullet_index, 2)
+
+
+class CoverLetterShortenTests(unittest.TestCase):
+    def _cover(self) -> CoverLetter:
+        return CoverLetter(
+            greeting="Dear Hiring Manager,",
+            paragraphs=["alpha " * 90, "beta " * 80, "gamma " * 70, "delta " * 60],
+            closing="Sincerely,",
+        )
+
+    def _system(self, cover: CoverLetter, **kwargs: object) -> str:
+        captured: dict[str, str] = {}
+
+        def fake_generate(**call: object) -> CoverLetter:
+            captured["system"] = str(call["system"])
+            return cover
+
+        with patch("jobapps.repair.generate_structured", side_effect=fake_generate):
+            shorten_cover_letter(cover, **kwargs)
+        return captured["system"]
+
+    def test_prompt_reports_length_and_one_page_target(self) -> None:
+        cover = self._cover()
+        system = self._system(cover, pages=2, overfull=["12.5pt"], attempt=1)
+        current = cover_letter_word_count(cover)
+        self.assertIn(f"currently {current} words", system)
+        self.assertIn("280-300", system)
+        self.assertIn("exactly 4 substantive paragraphs", system)
+        self.assertIn("The rendered PDF is 2 pages", system)
+        self.assertIn("signature must stay on page 1", system)
+        self.assertIn("long unbreakable tokens", system)
+        self.assertIn("280-300", COVER_LETTER_WRITER_PROMPT)
+        self.assertIn("signature", COVER_LETTER_WRITER_PROMPT)
+
+    def test_later_attempts_tighten_the_word_target(self) -> None:
+        cover = self._cover()
+        self.assertIn("250-270", self._system(cover, pages=2, attempt=2))
+        self.assertIn("220-240", self._system(cover, pages=2, attempt=3))
+        self.assertIn("200-230", self._system(cover, pages=2, attempt=4))
 
 
 if __name__ == "__main__":

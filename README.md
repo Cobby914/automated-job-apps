@@ -100,12 +100,15 @@ Optional: `template: auto` (default) scores the job description with token/phras
 
 Set `cover_letter: false` to skip cover-letter generation, review, and PDF.
 
-Graduation date is either **June 2027** or **Dec. 2027**. New-grad roles use June;
-other roles starting in Summer 2027 or later use December. Optional fields:
+Graduation date is **June 2028** for every internship and co-op, and for other
+roles that start in Summer 2027 or later. **June 2027** is used for 2027 new-grad
+roles, for non-intern roles that start before summer 2027, and when the role type
+and start date are unknown. `Dec. 2027` is accepted only as an explicit override.
+Optional fields:
 
 ```yaml
 starts: Summer 2027
-graduation: Dec. 2027
+graduation: June 2028
 ```
 
 Optional screening / portal questions — answers are grounded in selected career records, written to `materials/answers.md`, and checkpointed so a later Notion/PDF failure does not regenerate them:
@@ -165,7 +168,7 @@ Failures leave the YAML in place and write `*.error.txt` with a **failure catego
 
 `generation_failure` · `invalid_provenance` · `semantic_rejection` · `pdf_overflow` · `latex_compile_failure` · `provider_failure` · `upload_failure`
 
-Retry budgets: semantic rewrite 1, bullet repair 2, PDF-fit LLM repair 1–2, cover-letter repair 1, screening-answer repair 1. After that the application is marked for manual review instead of looping.
+Retry budgets: semantic rewrite 1, bullet repair 2, PDF-fit LLM repair 2 (4 when only the cover letter overflows), cover-letter repair 1, screening-answer repair 1. After that the application is marked for manual review instead of looping.
 
 Provider 429/5xx errors retry with backoff inside `llm.py`. A provider timeout does not restart earlier pipeline stages.
 

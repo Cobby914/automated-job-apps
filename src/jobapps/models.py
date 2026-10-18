@@ -29,12 +29,29 @@ def canonical_number(raw: str) -> str:
     return str(int(cleaned))
 
 
+def _is_version_like(text: str, start: int, end: int) -> bool:
+    """True when the number is part of an identifier such as '5.3a', 'v2', '3.11.4'."""
+    left, right = start, end
+    while left > 0 and (text[left - 1].isalnum() or text[left - 1] in "._"):
+        left -= 1
+    while right < len(text) and (text[right].isalnum() or text[right] in "._"):
+        right += 1
+    token = text[left:right].rstrip(".")
+    if not token or token == text[start:end]:
+        return False
+    if token.count(".") >= 2:
+        return True
+    return any(ch.isalpha() for ch in token)
+
+
 def numeric_claim_tokens(text: str) -> list[str]:
-    """Extract normalized numeric claims, skipping years."""
+    """Extract normalized numeric claims, skipping years and version identifiers."""
     tokens: list[str] = []
     for match in _NUMERIC_CLAIM_RE.finditer(text or ""):
         number = match.group(1)
         if _YEAR_RE.fullmatch(number.replace(",", "")):
+            continue
+        if _is_version_like(text or "", match.start(1), match.end(1)) and not match.group(2):
             continue
         tokens.append(canonical_number(number))
     return tokens
@@ -47,6 +64,8 @@ def numeric_percent_flags(text: str) -> dict[str, bool]:
     for match in _NUMERIC_CLAIM_RE.finditer(raw):
         number = match.group(1)
         if _YEAR_RE.fullmatch(number.replace(",", "")):
+            continue
+        if _is_version_like(raw, match.start(1), match.end(1)) and not match.group(2):
             continue
         key = canonical_number(number)
         unit = (match.group(2) or "").strip()
@@ -95,7 +114,8 @@ class Job(BaseModel):
     template: str = "auto"
     # Optional role start hint, e.g. "Summer 2027", "Fall 2027", "2027-09".
     starts: str = ""
-    # Optional force: "June 2027" or "Dec. 2027". When empty, inferred from starts.
+    # Optional force: "June 2027", "June 2028", or legacy "Dec. 2027".
+    # When empty, inferred from the role title and start date.
     graduation: str = ""
     # Skip cover-letter generation, review, and PDF when false.
     cover_letter: bool = True
